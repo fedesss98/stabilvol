@@ -1,0 +1,11 @@
+# Ignore data files
+data/external/*.csv
+data/raw/*.pickle
+data/interim/*.pickle
+data/processed/*.pickle
+
+# Images and plots
+visualization/
+
+# Project files
+.idea/
