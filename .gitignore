@@ -1,8 +1,12 @@
 # Ignore data files
 data/external/*.csv
+data/external/*.pickle
 data/raw/*.pickle
 data/interim/*.pickle
 data/processed/*.pickle
+
+# Ignore ipybb checkpoints
+notebooks/*
 
 # Images and plots
 visualization/
