@@ -6,7 +6,7 @@ data/interim/*.pickle
 data/processed/*.pickle
 
 # Ignore ipybb checkpoints
-notebooks/*
+notebooks/
 
 # Images and plots
 visualization/
