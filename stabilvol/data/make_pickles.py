@@ -13,45 +13,46 @@ import pandas as pd
 from stabilvol.utility.definitions import ROOT, MARKETS
 
 
-def extract_raw_data(market):
-    raw_data = ROOT / f'data/external/{market}.csv'
-    df = pd.read_csv(raw_data,
-                     index_col=0,
-                     skiprows=[1],
-                     sep=';',
-                     decimal=',',
-                     parse_dates=True,
-                     infer_datetime_format=True,
-                     na_values=['#N/D'])
-    # Rename columns and index
-    df.rename(columns=lambda x: x.replace(f' {market} Equity', ''), inplace=True)
-    df.index.name = 'Day'
-    # Order columns by number of values
-    ordered_columns_list = df.isnull().sum().sort_values().index
-    df = df.loc[:, ordered_columns_list]
-    return df
+class Database:
+    def __init__(self, folder, market):
+        df = pd.read_csv(f'{folder}/{market}.csv',
+                         index_col=0,
+                         skiprows=[1],
+                         sep=';',
+                         decimal=',',
+                         parse_dates=True,
+                         infer_datetime_format=True,
+                         na_values=['#N/D'])
+        # Rename columns and index
+        df.rename(columns=lambda x: x.replace(f' {market} Equity', ''), inplace=True)
+        df.index.name = 'Day'
+        # Order columns by number of values
+        ordered_columns_list = df.isnull().sum().sort_values().index
+        df = df.loc[:, ordered_columns_list]
+        self.data = df
+        self.market = market
 
+    def remove_holidays(self):
+        """
+        Select only business days in dataframe dates range
+        """
+        # Select business days in the dataframe
+        business_days = pd.bdate_range(self.data.index[0], self.data.index[-1])
+        self.data = self.data.loc[business_days]
 
-def remove_holidays(df):
-    """
-    Select only business days in dataframe dates range
-    :param df: DataFrame
-    :return: df: DataFrame without holidays
-    """
-    # Select business days in the dataframe
-    business_days = pd.bdate_range(df.index[0], df.index[-1])
-    df = df.loc[business_days]
-    return df
+    def save(self, folder):
+        print(f'Saving {self.market}.csv to {folder}')
+        self.data.to_pickle(f'{folder}/{self.market}.pickle')
 
 
 def main():
+    raw_folder = ROOT / 'data/external'
+    pickle_folder = ROOT / 'data/raw'
     for market in MARKETS:
-        data = extract_raw_data(market)
-        data = remove_holidays(data)
-        pickle_file = ROOT / f'data/raw/{market}.pickle'
-        print(f'Saving {market}.csv to {pickle_file}')
-        data.to_pickle(pickle_file)
-    return data
+        database = Database(raw_folder, market)
+        database.remove_holidays()
+        database.save(pickle_folder)
+    return None
 
 
 @click.command()
