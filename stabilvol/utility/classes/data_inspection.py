@@ -48,18 +48,40 @@ class Window:
     def count_series(self, df, **method):
         series = self.cut_series(df)
         if 'percentage' in method:
+            value = self.check_method_value(method.get('percentage'), 'percentage')
             selected_stocks = self.percent_selection(
-                series, method.get('percentage')
+                series, value
             )
         elif 'startend' in method:
+            value = self.check_method_value(method.get('startend'), 'startend')
             selected_stocks = self.startend_selection(
-                series, self.left, self.right, method.get('startend')
+                series, self.left, self.right, value
             )
+        else:
+            raise ValueError(f"Criterion '{method.keys()}' not known")
         self.stocks_inside = selected_stocks
         return len(selected_stocks)
 
     @staticmethod
+    def check_method_value(value, method):
+        if method == 'percentage':
+            if not isinstance(value, (str, float, int)):
+                raise ValueError("Percentage has incorrect format")
+            else:
+                value = float(value)
+            if value < 0 or value > 1:
+                raise ValueError("Percentage must be between 1 and 0")
+        elif method == 'startend':
+            if not isinstance(value, str, float, int):
+                raise ValueError("Percentage has incorrect format")
+            else:
+                value = int(value)
+        return value
+
+    @staticmethod
     def percent_selection(df, threshold):
+        # Convert threshold in float if it is served as string or leave it as is
+        threshold = float(threshold) if isinstance(threshold, str) else threshold
         # Select and count stocks with more data in slide than the threshold
         percentages_series = df.count() / len(df)
         selected_stocks = df.loc[:, percentages_series > threshold].columns
