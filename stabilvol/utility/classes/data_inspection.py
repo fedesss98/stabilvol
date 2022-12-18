@@ -7,7 +7,7 @@ import logging
 
 
 class Window:
-    def __init__(self, length, start):
+    def __init__(self, start, length=None, stop=None):
         """
         The Window is an Interval of dates of fixed length.
         Create it specifying the length and the initial date.
@@ -15,7 +15,7 @@ class Window:
         :param start: [string] or [datetime] initial date.
         """
         window_start = pd.Timestamp(start)
-        window_stop = window_start + DateOffset(years=length)
+        window_stop = window_start + DateOffset(years=length) if length else stop
         self._length = length
         self.interval = pd.Interval(window_start, window_stop)
         self.stocks_inside = None
@@ -45,7 +45,7 @@ class Window:
     def cut_series(self, df):
         return df.loc[self.left: self.right]
 
-    def count_series(self, df, **method):
+    def count_series(self, df, return_stocks=False, **method):
         series = self.cut_series(df)
         if 'percentage' in method:
             value = self.check_method_value(method.get('percentage'), 'percentage')
@@ -60,7 +60,10 @@ class Window:
         else:
             raise ValueError(f"Criterion '{method.keys()}' not known")
         self.stocks_inside = selected_stocks
-        return len(selected_stocks)
+        if return_stocks:
+            return selected_stocks
+        else:
+            return len(selected_stocks)
 
     @staticmethod
     def check_method_value(value, method):
@@ -72,16 +75,14 @@ class Window:
             if value < 0 or value > 1:
                 raise ValueError("Percentage must be between 1 and 0")
         elif method == 'startend':
-            if not isinstance(value, str, float, int):
-                raise ValueError("Percentage has incorrect format")
+            if not isinstance(value, (str, float, int)):
+                raise ValueError("StartEnd threshold has incorrect format")
             else:
-                value = int(value)
+                value = str(value)
         return value
 
     @staticmethod
     def percent_selection(df, threshold):
-        # Convert threshold in float if it is served as string or leave it as is
-        threshold = float(threshold) if isinstance(threshold, str) else threshold
         # Select and count stocks with more data in slide than the threshold
         percentages_series = df.count() / len(df)
         selected_stocks = df.loc[:, percentages_series > threshold].columns
