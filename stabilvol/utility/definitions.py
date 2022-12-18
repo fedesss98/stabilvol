@@ -13,6 +13,7 @@ DATA_ROOT = Path(
 # Available markets from Bloomberg
 MARKETS = {'GF', 'JT', 'LN', 'UN', 'UW'}
 
+FIRST_VALID_DAY = '1980-01-01'
 LAST_VALID_DAY = '2022-07-01'
 
 
