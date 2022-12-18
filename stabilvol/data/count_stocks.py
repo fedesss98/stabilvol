@@ -15,10 +15,15 @@ a stock must follow one of those criteria:
 """
 import click
 import matplotlib.pyplot as plt
+import multiprocessing as mp
 import pandas as pd
 from tqdm import tqdm
-from ..utility.classes.data_inspection import Window
-from ..utility.definitions import ROOT, MARKETS, LAST_VALID_DAY
+try:
+    from ..utility.classes.data_inspection import Window
+    from ..utility.definitions import ROOT, MARKETS, FIRST_VALID_DAY, LAST_VALID_DAY
+except ImportError:
+    from stabilvol.utility.classes.data_inspection import Window
+    from stabilvol.utility.definitions import ROOT, MARKETS, FIRST_VALID_DAY, LAST_VALID_DAY
 
 
 def check_inputs(criterion, threshold):
@@ -96,6 +101,8 @@ def main(window_lengths: list,
     :return: None
     """
     total_stocks_count = dict()
+    windows = [Window(start=start, length=int(length)) for length in window_lengths]
+    pool = mp.Pool(mp.cpu_count())
     for length in window_lengths:
         window = Window(start=start, length=int(length))
         if sliding:
@@ -134,11 +141,11 @@ def count_stocks(window_lengths, start, slide, end, save, markets, criterion):
 
 
 if __name__ == "__main__":
-    window_lengths = [10]
-    criterion = {'percentage': 0.8}
+    window_lengths = [10, 15, 20, 30]
+    criterion = {'startend': '5d'}
     slide = True
-    start = '2000-01-01'
-    end = '2020-01-01'
-    markets = ['GF']
-    save = False
+    start = FIRST_VALID_DAY
+    end = LAST_VALID_DAY
+    markets = MARKETS
+    save = True
     main(window_lengths, start, slide, end, save, markets, criterion)
