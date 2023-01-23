@@ -11,8 +11,12 @@ import pandas as pd
 from pandas.tseries.offsets import DateOffset
 from pathlib import Path
 
-from data_inspection import Window
-from utility.definitions import ROOT
+try:
+    from data_inspection import Window
+    from utility.definitions import ROOT
+except ModuleNotFoundError:
+    from utility.classes.data_inspection import Window
+    from utility.definitions import ROOT
 
 logging.basicConfig(format='%(levelname)s: %(asctime)s - %(message)s', level=logging.INFO)
 
@@ -24,8 +28,8 @@ class DataExtractor:
             end_date=None,
             duration=None,
             sigma_range=(0.01, 1000),
-            criterion='percentage',
-            criterion_value=0.8,
+            criterion='startend',
+            criterion_value='5d',
     ):
         """
         Initialize Data Extractor.
@@ -97,7 +101,7 @@ class DataExtractor:
         if not self.end_date:
             self.end_date = df.index[-1]
         df = df.loc[self.start_date: self.end_date]
-        logging.info("")
+        logging.info(f" - {len(df)} days selected")
         return df
 
     def __pick_stocks(self, df):
@@ -150,6 +154,6 @@ class DataExtractor:
 
 if __name__ == "__main__":
     accountant = DataExtractor()
-    data = accountant.extract_data(ROOT / 'data/raw/UN.pickle')
+    data = accountant.extract_data(ROOT / 'data/interim/UN.pickle')
     assert isinstance(data, pd.DataFrame)
     assert len(data) > 0
