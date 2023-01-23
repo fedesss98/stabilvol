@@ -229,6 +229,7 @@ class StocksCountingFrame(ttk.Frame):
         super().__init__(container)
 
         # Initialize inputs
+        self.total_stocks_count = None
         self.markets = []
         self.windows = [10]
         self.start_date = '1980-01-01'
@@ -299,7 +300,8 @@ class StocksCountingFrame(ttk.Frame):
     def start_counting(self):
         self.retrieve_inputs()
         print("*** OUTPUT ***")
-        count_stocks(**self.inputs)
+        self.total_stocks_count = count_stocks(**self.inputs)
+        return None
 
     @property
     def inputs(self):
@@ -315,15 +317,25 @@ class StocksCountingFrame(ttk.Frame):
 
 
 class OutputFrame(ttk.LabelFrame):
-    def __init__(self, container, inputs):
+    def __init__(self, container, input, output):
         super().__init__(container, text="Output", height=400)
+
+        self.input = input
+        self.output = output
+
         # field options
 
         self.output_menu = ttk.Notebook(self)
         self.text_frame = tk.Label(self.output_menu, text="Output will be displayed here.")
+        self.output_text = tk.Text(self.text_frame)
+        try:
+            self.output_text.insert(1.0, self.output.max())
+        except AttributeError:
+            self.output_text.insert(1.0, "Output")
 
         self.output_menu.pack()
         self.text_frame.pack(fill='x')
+        self.output_text.pack(fill='x')
 
         # add padding to the frame and show it
         self.grid(column=0, row=2, padx=20, pady=10, sticky=tk.NSEW)
@@ -353,5 +365,5 @@ class App(tk.Tk):
 if __name__ == "__main__":
     app = App()
     interface = StocksCountingFrame(app)
-    OutputFrame(app, interface.inputs)
+    OutputFrame(app, interface.inputs, interface.total_stocks_count)
     app.mainloop()
