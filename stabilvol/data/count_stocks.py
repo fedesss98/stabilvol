@@ -67,10 +67,11 @@ def single_counting(markets, window, **criterion):
     return market_stocks_counts
 
 
-def output_results(df):
+def output_results(df, sliding):
     print(df.max())
-    df.plot()
-    plt.show()
+    if sliding:
+        df.plot()
+        plt.show()
     return None
 
 
@@ -117,8 +118,8 @@ def main(window_lengths: list,
     total_stocks_count.index.name = 'Day'
     if save:
         save_results(total_stocks_count, criterion)
-    output_results(total_stocks_count)
-    return None
+    output_results(total_stocks_count, sliding)
+    return total_stocks_count
 
 
 @click.command()
