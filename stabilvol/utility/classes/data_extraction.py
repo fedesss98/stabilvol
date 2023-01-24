@@ -106,6 +106,7 @@ class DataExtractor:
 
     def __pick_stocks(self, df):
         """
+        Creates a Window object.
         Select stocks included in the window between
         start date and end date with chosen criterion
 
@@ -153,7 +154,8 @@ class DataExtractor:
 
 
 if __name__ == "__main__":
-    accountant = DataExtractor()
-    data = accountant.extract_data(ROOT / 'data/interim/UN.pickle')
+    market = 'JT'
+    accountant = DataExtractor(start_date='2002-01-01', duration=12, criterion_value=5)
+    data = accountant.extract_data(ROOT / f'data/interim/{market}.pickle')
     assert isinstance(data, pd.DataFrame)
-    assert len(data) > 0
+    assert len(data.columns) > 0, "There are no data with selected criterion"
