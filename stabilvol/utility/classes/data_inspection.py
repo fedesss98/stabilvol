@@ -45,6 +45,22 @@ class Window:
     def cut_series(self, df):
         return df.loc[self.left: self.right]
 
+    @staticmethod
+    def check_method_value(value, method):
+        if method == 'percentage':
+            if not isinstance(value, (str, float, int)):
+                raise ValueError("Percentage has incorrect format")
+            else:
+                value = float(value)
+            if value < 0 or value > 1:
+                raise ValueError("Percentage must be between 1 and 0")
+        elif method == 'startend':
+            if not isinstance(value, (str, float, int)):
+                raise ValueError("StartEnd threshold has incorrect format")
+            else:
+                value = str(value)
+        return value
+
     def count_series(self, df, return_stocks=False, **method):
         series = self.cut_series(df)
         if 'percentage' in method:
@@ -65,21 +81,6 @@ class Window:
         else:
             return len(selected_stocks)
 
-    @staticmethod
-    def check_method_value(value, method):
-        if method == 'percentage':
-            if not isinstance(value, (str, float, int)):
-                raise ValueError("Percentage has incorrect format")
-            else:
-                value = float(value)
-            if value < 0 or value > 1:
-                raise ValueError("Percentage must be between 1 and 0")
-        elif method == 'startend':
-            if not isinstance(value, (str, float, int)):
-                raise ValueError("StartEnd threshold has incorrect format")
-            else:
-                value = str(value)
-        return value
 
     @staticmethod
     def percent_selection(df, threshold):
@@ -98,7 +99,7 @@ class Window:
             # There can be no stocks here, return empty list
             return []
         else:
-            selected_stocks = df.loc[:, (left_distance < threshold) & (right_distance < threshold)].columns
+            selected_stocks = df.loc[:, (left_distance <= threshold) & (right_distance <= threshold)].columns
             return selected_stocks.values
 
     @staticmethod
