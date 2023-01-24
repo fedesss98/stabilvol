@@ -129,7 +129,7 @@ class StabilVolter:
         return None
 
     @staticmethod
-    def _select_date_ranges(series, start, end):
+    def _select_date_ranges(series, start, end) -> list:
         """
         Select start and end date where returns change
         from the starting threshold to the ending threshold
@@ -151,7 +151,7 @@ class StabilVolter:
                 counting = False
         return date_ranges
 
-    def _make_date_ranges(self):
+    def _make_date_ranges(self) -> pd.DataFrame:
         """
         Makes a DataFrame with date ranges for every stock.
 
@@ -162,7 +162,6 @@ class StabilVolter:
         )
         self.date_ranges = date_ranges.copy()
         return date_ranges
-
 
     def count_stock_fht(
             self, series, threshold_start=None, threshold_end=None, divergence_limit=None
@@ -182,7 +181,7 @@ class StabilVolter:
         try:
             date_ranges = self.date_ranges[series.name]
         except IndexError:
-            date_ranges = self._select_date_ranges(series, start=threshold_start, end=threshold_end)
+            date_ranges = self._select_date_ranges(series, start=start, end=end)
         stabilvol_list = list()
         for interval in date_ranges[series.name]:
             chunck = series.loc[interval[0]: interval[1]]
@@ -278,12 +277,19 @@ if __name__ == "__main__":
     from utility.classes.stability_analysis import StabilVolter
     from utility.definitions import ROOT
 
-    accountant = DataExtractor(start_date='2002-01-01', duration=12)
-    data = accountant.extract_data(ROOT / 'data/interim/GF.pickle')
-    analyst = StabilVolter(end_level=-1)
+    Y1 = np.array([1, -1, 0, 1, 0, -1, 1, -1, 0, -1])
+    Y2 = np.array([1, 0, 0, 0, -1, -1, 1, 0, 0, -1])
+    data = pd.DataFrame(np.vstack((Y1, Y2)).T, columns=['y1', 'y2'])
+    start_level = 0.5
+    end_level = -0.5
+    analyst = StabilVolter(start_level=start_level, end_level=end_level)
     stabilvol = analyst.get_stabilvol(data)
+    given_stabilvol = np.array([
+        [np.sqrt(2), 2],
+        [np.sqrt(2/2), 3],
+        [np.sqrt(2), 2],
+        [np.sqrt(2/4), 5],
+        [np.sqrt(2/3), 4]
+    ])
     analyst.plot_fht()
-    mfht = analyst.get_average_stabilvol(nbins=35000)
-    ax = analyst.plot_mfht(edit=True)
-    ax.set_xlim(0, 0.15)
-    plt.show()
+    assert np.array_equal(stabilvol.values, given_stabilvol), "Stabilvol incorrect."
