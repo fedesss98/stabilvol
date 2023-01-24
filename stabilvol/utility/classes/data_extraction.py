@@ -29,7 +29,7 @@ class DataExtractor:
             duration=None,
             sigma_range=(0.01, 1000),
             criterion='startend',
-            criterion_value='5d',
+            criterion_value='6d',
     ):
         """
         Initialize Data Extractor.

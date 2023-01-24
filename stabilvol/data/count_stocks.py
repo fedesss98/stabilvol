@@ -127,7 +127,7 @@ def main(window_lengths: list,
 @click.option('-s', '--start', type=str, default='1980-01-01')
 @click.option('-e', '--end', type=str, default=LAST_VALID_DAY)
 @click.option('-c', '--criterion', type=(str, str), multiple=False,
-              default=('percentage', '0.6'))
+              default=('startend', '6d'))
 @click.option('--slide', is_flag=True)
 @click.option('--save/--no-save', default=True)
 @click.option('-m', '--markets', multiple=True, default=MARKETS)
@@ -142,11 +142,11 @@ def count_stocks(window_lengths, start, slide, end, save, markets, criterion):
 
 
 if __name__ == "__main__":
-    window_lengths = [10, 15, 20, 30]
-    criterion = {'startend': '5d'}
+    window_lengths = [12, ]
+    criterion = {'startend': '6d'}
     slide = True
     start = FIRST_VALID_DAY
     end = LAST_VALID_DAY
     markets = MARKETS
-    save = True
+    save = False
     main(window_lengths, start, slide, end, save, markets, criterion)
