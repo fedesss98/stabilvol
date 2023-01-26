@@ -9,6 +9,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
 
+from utility.definitions import ROOT
+
 logging.basicConfig(format='%(levelname)s: %(asctime)s - %(message)s', level=logging.INFO)
 
 
@@ -45,6 +47,7 @@ class StabilVolter:
         self.data_states: pd.DataFrame = None
         self.stabilvol: pd.DataFrame = None
         self.nbins = None
+        self.stabilvol_binned = None
 
     @property
     def threshold_start(self) -> float:
@@ -193,11 +196,13 @@ class StabilVolter:
         )
         return self.stabilvol
 
-    def get_stabilvol(self, data=None) -> pd.Series:
+    def get_stabilvol(self, data=None, save=False) -> pd.Series:
         """
         Count First Hitting Times of entire DataFrame.
+        Gaps in returns data are dropped.
 
         :param pd.DataFrame data: DataFrame with stocks data
+        :param bool save: Save FHT to file
         :return: Series with FHTs
         """
         if data is not None:
@@ -209,7 +214,7 @@ class StabilVolter:
         for stock, series in self.data.items():
             analyzed_stocks.append(stock)
             for interval in date_ranges[stock]:
-                chunk = series.loc[interval[0]: interval[1]]
+                chunk = series.loc[interval[0]: interval[1]].dropna()  # Drop null values
                 volatility = chunk.std()
                 fht = len(chunk)
                 stabilvol_list.append((volatility, fht))
@@ -271,25 +276,51 @@ class StabilVolter:
             plt.show()
         return ax
 
+    def save_fht(self, market=None, filename=None, *args):
+        if self.stabilvol is None:
+            raise ValueError("FHT has not been calculated yet")
+        if not market and not filename:
+            raise ValueError("Specify a market or a filename to save the data.")
+        start_level_string = str(self._start).replace('.', 'p').replace('-', 'n')
+        end_level_string = str(self._end).replace('.', 'p').replace('-', 'n')
+        if filename is None:
+            filename = f'{market}_{start_level_string}_{end_level_string}_{"_".join(args)}'
+        self.stabilvol.to_pickle(ROOT / f"data/processed/fht/{filename}.pickle")
+        return None
+
+    def save_mfht(self, market=None, filename=None, *args):
+        if self.stabilvol_binned is None:
+            raise ValueError("MFHT has not been calculated yet")
+        if not market and not filename:
+            raise ValueError("Specify a market or a filename to save the data.")
+        # Remove punctuation for use in filename
+        start_level_string = str(self._start).replace('.', 'p').replace('-', 'n')
+        end_level_string = str(self._end).replace('.', 'p').replace('-', 'n')
+        if filename is None:
+            filename = f'{market}_{start_level_string}_{end_level_string}_{self.nbins}_{"_".join(args)}'
+        self.stabilvol.to_pickle(ROOT / f"data/processed/mfht/{filename}.pickle")
+        return None
+
 
 if __name__ == "__main__":
-    from utility.classes.data_extraction import DataExtractor
     from utility.classes.stability_analysis import StabilVolter
-    from utility.definitions import ROOT
 
     Y1 = np.array([1, -1, 0, 1, 0, -1, 1, -1, 0, -1])
     Y2 = np.array([1, 0, 0, 0, -1, -1, 1, 0, 0, -1])
-    data = pd.DataFrame(np.vstack((Y1, Y2)).T, columns=['y1', 'y2'])
+    Y3 = np.array([1, np.nan, np.nan, 0, 0, -1, 1, -1, 0, -1])
+    data = pd.DataFrame(np.vstack((Y1, Y2, Y3)).T, columns=['y1', 'y2', 'y3'])
     start_level = 0.5
     end_level = -0.5
     analyst = StabilVolter(start_level=start_level, end_level=end_level)
     stabilvol = analyst.get_stabilvol(data)
     given_stabilvol = np.array([
         [np.sqrt(2), 2],
-        [np.sqrt(2/2), 3],
+        [np.sqrt(2 / 2), 3],
         [np.sqrt(2), 2],
-        [np.sqrt(2/4), 5],
-        [np.sqrt(2/3), 4]
+        [np.sqrt(2 / 4), 5],
+        [np.sqrt(2 / 3), 4],
+        [np.sqrt(2 / 3), 4],
+        [np.sqrt(2 / 1), 2]
     ])
     analyst.plot_fht()
     assert np.array_equal(stabilvol.values, given_stabilvol), "Stabilvol incorrect."
