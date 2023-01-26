@@ -7,9 +7,12 @@ Extract Dataset from raw DataFrames by selecting:
 """
 import logging
 import pickle
+
+import matplotlib.pyplot as plt
 import pandas as pd
 from pandas.tseries.offsets import DateOffset
 from pathlib import Path
+import seaborn as sns
 
 try:
     from data_inspection import Window
@@ -151,6 +154,16 @@ class DataExtractor:
         df = self.__filter_variability(df)
         self.data = df
         return df
+
+    def plot_selection(self):
+        avg_max = self.data.max().median()
+        avg_min = self.data.min().median()
+        fig, ax = plt.subplots(figsize=(6, 6))
+        sns.heatmap(self.data,
+                    vmax=avg_max,
+                    vmin=avg_min,
+                    ax = ax)
+        return ax
 
 
 if __name__ == "__main__":
