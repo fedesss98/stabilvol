@@ -155,15 +155,18 @@ class DataExtractor:
         self.data = df
         return df
 
-    def plot_selection(self):
+    def plot_selection(self, edit=False):
         avg_max = self.data.max().median()
         avg_min = self.data.min().median()
         fig, ax = plt.subplots(figsize=(6, 6))
-        sns.heatmap(self.data,
+        sns.heatmap(self.data.T,
                     vmax=avg_max,
                     vmin=avg_min,
-                    ax = ax)
-        return ax
+                    ax=ax)
+        if edit:
+            return ax
+        else:
+            plt.show()
 
 
 if __name__ == "__main__":
