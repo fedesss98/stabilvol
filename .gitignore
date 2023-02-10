@@ -1,9 +1,5 @@
 # Ignore data files
-data/external/*.csv
-data/external/*.pickle
-data/raw/*.pickle
-data/interim/*.pickle
-data/processed/*.pickle
+data/
 
 # Ignore ipybb checkpoints
 notebooks/
