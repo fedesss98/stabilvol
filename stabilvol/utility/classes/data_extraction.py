@@ -15,10 +15,11 @@ from pathlib import Path
 import seaborn as sns
 
 try:
+    from stabilvol.utility.classes.data_inspection import Window
+    from stabilvol.utility.definitions import ROOT
+except ModuleNotFoundError as e:
+    logging.warning(f"Error in data_extraction: {e}")
     from data_inspection import Window
-    from utility.definitions import ROOT
-except ModuleNotFoundError:
-    from utility.classes.data_inspection import Window
     from utility.definitions import ROOT
 
 logging.basicConfig(format='%(levelname)s: %(asctime)s - %(message)s', level=logging.INFO)
@@ -44,14 +45,13 @@ class DataExtractor:
         :param str criterion: 'percentage' or 'startend'
         :param str | int | float criterion_value: threshold for the criterion
         """
-        self.start_date, self.end_date, self.duration = self.__check_dates(
+        self.start_date, self.end_date, self.duration = self.check_dates(
             start_date, end_date, duration
         )
         self._sigma_range = sigma_range
         self.min_sigma = sigma_range[0]
         self.max_sigma = sigma_range[-1]
         self._criterion, self._value = self.__check_criterion(criterion, criterion_value)
-        self.criterion = {self._criterion: self._value}
 
         # Initialize internal attributes
         self.data: pd.DataFrame = None
@@ -60,12 +60,18 @@ class DataExtractor:
         # Print info
         logging.info("DataExtractor created.")
 
+    @property
+    def criterion(self):
+        self._criterion, self._value = self.__check_criterion(
+            self._criterion, self._value)
+        return {self._criterion: self._value}
+
     @staticmethod
-    def __check_dates(start, end, duration):
+    def check_dates(start, end, duration):
         if start is not None:
             start = pd.Timestamp(start)
         if duration and not end:
-            duration = DateOffset(years=duration)
+            duration = DateOffset(years=int(duration))
             end = start + duration
         elif end and not duration:
             end = pd.Timestamp(end)
@@ -156,10 +162,13 @@ class DataExtractor:
         return df
 
     def plot_selection(self, edit=False):
-        avg_max = self.data.max().median()
         avg_min = self.data.min().median()
-        fig, ax = plt.subplots(figsize=(6, 6))
-        sns.heatmap(self.data.T,
+        avg_max = self.data.max().median()
+        plot_data = self.data.copy()
+        plot_data.index = plot_data.index.strftime("%Y-%m-%d")
+        fig, ax = plt.subplots(figsize=(6, 6), tight_layout=True)
+        ax.set_title("Selected stocks")
+        sns.heatmap(plot_data.T,
                     vmax=avg_max,
                     vmin=avg_min,
                     ax=ax)
@@ -168,10 +177,22 @@ class DataExtractor:
         else:
             plt.show()
 
+    def plot_returns(self, returns=None, ticker=None):
+        if returns is None and ticker is None:
+            raise ValueError("Insert something to plot or the ticker of a stock")
+        elif ticker is not None:
+            returns = self.data[ticker]
+        fig, ax = plt.subplots(figsize=(8, 4), tight_layout=True)
+        ax.set_title(f"{ticker} returns in window")
+        sns.lineplot(returns)
+        ax.grid(True)
+        plt.show()
+
 
 if __name__ == "__main__":
-    market = 'JT'
+    market = 'UN'
     accountant = DataExtractor(start_date='2002-01-01', duration=12, criterion_value=5)
     data = accountant.extract_data(ROOT / f'data/interim/{market}.pickle')
+    accountant.plot_selection()
     assert isinstance(data, pd.DataFrame)
     assert len(data.columns) > 0, "There are no data with selected criterion"
