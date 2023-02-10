@@ -13,14 +13,16 @@ a stock must follow one of those criteria:
             a certain number of days from the window
             limits
 """
+import multiprocessing as mp
+
 import click
 import matplotlib.pyplot as plt
-import multiprocessing as mp
 import pandas as pd
 from tqdm import tqdm
+
 try:
-    from ..utility.classes.data_inspection import Window
-    from ..utility.definitions import ROOT, MARKETS, FIRST_VALID_DAY, LAST_VALID_DAY
+    from utility.classes.data_inspection import Window
+    from utility.definitions import ROOT, MARKETS, FIRST_VALID_DAY, LAST_VALID_DAY
 except ImportError:
     from stabilvol.utility.classes.data_inspection import Window
     from stabilvol.utility.definitions import ROOT, MARKETS, FIRST_VALID_DAY, LAST_VALID_DAY
