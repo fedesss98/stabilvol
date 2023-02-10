@@ -2,15 +2,14 @@
 
 Class to perform First Hitting Times counting
 """
-import logging
 
 import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
 
-from utility.definitions import ROOT
-
+from pathlib import Path
+import logging
 logging.basicConfig(format='%(levelname)s: %(asctime)s - %(message)s', level=logging.INFO)
 
 
@@ -43,11 +42,15 @@ class StabilVolter:
         self.tau_max = tau_max
 
         # Initialize internal attributes
+        self.root = Path(__file__).parent.parent.parent.parent
         self.data: pd.DataFrame = None
         self.data_states: pd.DataFrame = None
         self.stabilvol: pd.DataFrame = None
         self.nbins = None
         self.stabilvol_binned = None
+
+        # Print info
+        logging.info("StabilVolter created.")
 
     @property
     def threshold_start(self) -> float:
@@ -99,23 +102,23 @@ class StabilVolter:
         0 if it is between the thresholds,
         -1 if it is under the ending threshold
 
-        :param x: value of a return
+        :param series: value of a stocl returns
         :param start: starting threshold
         :param end: ending threshold
         :return: state of the value [+1, -1 or 0]
         """
         series_iterator = np.nditer(series, flags=['c_index'])
-        X = np.zeros(series.shape, dtype=np.int8)
+        states = np.zeros(series.shape, dtype=np.int8)
         counting = False
         for x in series_iterator:
             i = series_iterator.index
             if x > start and not counting:
-                X[i] = 1
+                states[i] = 1
                 counting = True
             elif x < end and counting:
-                X[i] = -1
+                states[i] = -1
                 counting = False
-        return X
+        return states
 
     def _make_states(self):
         """
@@ -196,7 +199,7 @@ class StabilVolter:
         )
         return self.stabilvol
 
-    def get_stabilvol(self, data=None, save=False) -> pd.Series:
+    def get_stabilvol(self, data=None, save=False) -> pd.DataFrame:
         """
         Count First Hitting Times of entire DataFrame.
         Gaps in returns data are dropped.
@@ -205,6 +208,7 @@ class StabilVolter:
         :param bool save: Save FHT to file
         :return: Series with FHTs
         """
+        logging.info("Starting stability analysis.")
         if data is not None:
             self.data = data
         # Take date ranges for starting and ending counts
@@ -224,11 +228,12 @@ class StabilVolter:
         logging.info(f"{len(analyzed_stocks)} Stocks analyzed.")
         return self.stabilvol
 
-    def get_average_stabilvol(self, nbins=50):
-        nbins = self.nbins if self.nbins is not None else nbins
-        volatility = self.stabilvol['Volatility']
-        bins = np.linspace(0, volatility.max(), num=nbins)
-        stabilvol_binned = self.stabilvol.groupby(pd.cut(volatility, bins=bins)).mean()
+    def get_average_stabilvol(self, stabilvol=None, nbins=50):
+        stabilvol = self.stabilvol if stabilvol is None else stabilvol
+        self.nbins = nbins
+        volatility = stabilvol['Volatility']
+        bins = np.linspace(0, volatility.max(), num=self.nbins)
+        stabilvol_binned = stabilvol.groupby(pd.cut(volatility, bins=bins)).mean()
         self.stabilvol_binned = pd.DataFrame(stabilvol_binned)
         return stabilvol_binned
 
@@ -245,13 +250,14 @@ class StabilVolter:
         ax.set_xlabel('Days', fontsize=24)
         return ax
 
-    def plot_fht(self, title=None):
+    def plot_fht(self, data_to_plot=None, title=None):
+        data_to_plot = self.stabilvol if data_to_plot is None else data_to_plot
         fig, ax = plt.subplots(figsize=(10, 6))
         suptitle = "First Hitting Times" if title is None else title
         fig.suptitle(suptitle, fontsize=20)
         ax.set_title(f"Thresholds: [ {self.threshold_start:.4} / {self.threshold_end:.4} ]",
                      fontsize=16)
-        sns.scatterplot(self.stabilvol,
+        sns.scatterplot(data_to_plot,
                         x='Volatility',
                         y='FHT')
         ax.set_yscale('log')
@@ -260,13 +266,14 @@ class StabilVolter:
         plt.show()
         return ax
 
-    def plot_mfht(self, title=None, edit=False):
+    def plot_mfht(self, data_to_plot=None, title=None, edit=False):
+        data_to_plot = data_to_plot if data_to_plot is not None else self.stabilvol_binned
         fig, ax = plt.subplots(figsize=(10, 6))
         suptitle = "Mean First Hitting Times" if title is None else title
         fig.suptitle(suptitle, fontsize=20)
         ax.set_title(f"Thresholds: [ {self.threshold_start:.4} / {self.threshold_end:.4} ]",
                      fontsize=16)
-        sns.scatterplot(self.stabilvol_binned,
+        sns.scatterplot(data_to_plot,
                         x='Volatility',
                         y='FHT')
         ax.set_yscale('log')
@@ -276,21 +283,24 @@ class StabilVolter:
             plt.show()
         return ax
 
-    def save_fht(self, market=None, filename=None, *args):
-        if self.stabilvol is None:
-            raise ValueError("FHT has not been calculated yet")
+    def save_fht(self, data_to_save=None, market=None, filename=None, format='pickle', *args):
+        data_to_save = self.stabilvol if data_to_save is None else data_to_save
         if not market and not filename:
             raise ValueError("Specify a market or a filename to save the data.")
         start_level_string = str(self._start).replace('.', 'p').replace('-', 'n')
         end_level_string = str(self._end).replace('.', 'p').replace('-', 'n')
         if filename is None:
             filename = f'{market}_{start_level_string}_{end_level_string}_{"_".join(args)}'
-        self.stabilvol.to_pickle(ROOT / f"data/processed/fht/{filename}.pickle")
+        if format == 'pickle':
+            data_to_save.to_pickle(self.root / f"data/processed/fht/{filename}.pickle")
+        elif format == 'csv':
+            data_to_save.to_pickle(self.root / f"data/processed/fht/{filename}.csv")
+        else:
+            raise ValueError("File format for saving unknown. Try 'csv' or 'pickle'")
         return None
 
-    def save_mfht(self, market=None, filename=None, *args):
-        if self.stabilvol_binned is None:
-            raise ValueError("MFHT has not been calculated yet")
+    def save_mfht(self, data_to_save=None, market=None, filename=None, format='pickle', *args):
+        data_to_save = self.stabilvol_binned if data_to_save is None else data_to_save
         if not market and not filename:
             raise ValueError("Specify a market or a filename to save the data.")
         # Remove punctuation for use in filename
@@ -298,13 +308,16 @@ class StabilVolter:
         end_level_string = str(self._end).replace('.', 'p').replace('-', 'n')
         if filename is None:
             filename = f'{market}_{start_level_string}_{end_level_string}_{self.nbins}_{"_".join(args)}'
-        self.stabilvol.to_pickle(ROOT / f"data/processed/mfht/{filename}.pickle")
+        if format == 'pickle':
+            data_to_save.to_pickle(self.root / f"data/processed/mfht/{filename}.pickle")
+        elif format == 'csv':
+            data_to_save.to_csv(self.root / f"data/processed/mfht/{filename}.csv")
+        else:
+            raise ValueError("File format for saving unknown. Try 'csv' or 'pickle'")
         return None
 
 
 if __name__ == "__main__":
-    from utility.classes.stability_analysis import StabilVolter
-
     Y1 = np.array([1, -1, 0, 1, 0, -1, 1, -1, 0, -1])
     Y2 = np.array([1, 0, 0, 0, -1, -1, 1, 0, 0, -1])
     Y3 = np.array([1, np.nan, np.nan, 0, 0, -1, 1, -1, 0, -1])
