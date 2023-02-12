@@ -266,16 +266,38 @@ class StabilVolter:
         plt.show()
         return ax
 
-    def plot_mfht(self, data_to_plot=None, title=None, edit=False):
+    def plot_mfht(self, data_to_plot=None, title=None, ax=None, edit=False):
         data_to_plot = data_to_plot if data_to_plot is not None else self.stabilvol_binned
+        if ax is None:
+            fig, ax = plt.subplots(figsize=(10, 6))
+            suptitle = "Mean First Hitting Times" if title is None else title
+            fig.suptitle(suptitle, fontsize=20)
+            ax.set_title(f"Thresholds: [ {self.threshold_start:.4} / {self.threshold_end:.4} ]",
+                         fontsize=16)
+        ax = sns.scatterplot(data_to_plot,
+                             x='Volatility',
+                             y='FHT',
+                             ax=ax)
+        ax.set_xlim(0, 0.15)
+        ax.set_yscale('log')
+        ax.grid()
+        plt.tight_layout()
+        if not edit:
+            plt.show()
+        return ax
+
+    def plot_mfht(self, title=None, edit=False, *data_to_plot):
+        data_to_plot = pd.concat(data_to_plot)
         fig, ax = plt.subplots(figsize=(10, 6))
         suptitle = "Mean First Hitting Times" if title is None else title
         fig.suptitle(suptitle, fontsize=20)
         ax.set_title(f"Thresholds: [ {self.threshold_start:.4} / {self.threshold_end:.4} ]",
                      fontsize=16)
-        sns.scatterplot(data_to_plot,
-                        x='Volatility',
-                        y='FHT')
+        ax = sns.scatterplot(data_to_plot,
+                             x='Volatility',
+                             y='FHT',
+                             ax=ax)
+        ax.set_xlim(0, 0.15)
         ax.set_yscale('log')
         ax.grid()
         plt.tight_layout()
