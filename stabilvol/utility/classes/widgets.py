@@ -7,9 +7,10 @@ import matplotlib.pyplot as plt
 import tkinter as tk
 from tkinter import ttk
 from tkinter import messagebox
-import logging
 
+import logging
 import pandas as pd
+import itertools
 
 try:
     from stabilvol.utility.definitions import ROOT
@@ -26,6 +27,7 @@ except ModuleNotFoundError as e:
     from analyze.count_fht import main as count_fht
 
 from pathlib import Path
+
 DATABASE = Path(__file__).parent.parent.parent.parent / 'data'
 MARKETS = [file.stem for file in (DATABASE / 'interim').glob('*.pickle')]
 
@@ -130,7 +132,7 @@ class EndTextFrame(ttk.Frame):
         self.frame_label = ttk.Label(self, text="End Date", font=FONTS['h4'])
         self.frame_label_help = ttk.Label(
             self,
-            text="Insert the ending date for the windows (YYYY-MM-DD)",
+            text="Insert the ending date for the windows (YYYY-MM-DD or YYYY)",
             font=FONTS['p-help'],
         )
         self.start_string = tk.Entry(self, textvariable=container.end_date)
@@ -335,6 +337,33 @@ class NbinsFrame(ttk.Frame):
         self.grid(column=col, row=row, padx=5, pady=5, sticky=tk.W)
 
 
+class StackChoiceFrame(ttk.Frame):
+    """
+    Windows selection Frame.
+    You can enter the lengths of the windows to use.
+    """
+
+    def __init__(self, container, col, row):
+        super().__init__(container)
+        # Insert separator before widget
+        ttk.Separator(self, orient=tk.HORIZONTAL).grid(column=0, row=0, ipadx=150, pady=10)
+
+        self.frame_label = ttk.Label(self, text="Stack plots", font=FONTS['h4'])
+        self.frame_label_help = ttk.Label(
+            self, font=FONTS['p-help'], wraplength=250,
+            text="Stack multiple plots on the same chart or view them separately",
+        )
+        self.yes_choice = ttk.Radiobutton(self, text="Yes", value=True, variable=container.stack)
+        self.no_choice = ttk.Radiobutton(self, text="No", value=False, variable=container.stack)
+        # Place Widgets
+        self.frame_label.grid(column=0, row=1, sticky=tk.W)
+        self.frame_label_help.grid(column=0, row=2, sticky=tk.W)
+        self.yes_choice.grid(column=0, row=3, sticky=tk.EW)
+        self.no_choice.grid(column=0, row=4, sticky=tk.EW)
+        # Place Frame
+        self.grid(column=col, row=row, padx=5, pady=5, sticky=tk.EW)
+
+
 class ReturnsSelection(ttk.Frame):
     """
     Returns selection Frame.
@@ -385,6 +414,7 @@ class StatusFrame(ttk.Frame):
     - std of the market
     - counted/not counted fht
     """
+
     def __init__(self, container, col, row, columnspan=1):
         super().__init__(container)
 
@@ -404,13 +434,14 @@ class StabilvolFrame(ttk.Frame):
     def __init__(self, container):
         super().__init__(container)
 
+        self.stabilvols_binned = []
         self.container = container
         self.done_counting = tk.BooleanVar(self, value=False)
         # Variables
         self.available_markets = tk.Variable(self, value=MARKETS, name='markets')
-        self.start_date = tk.StringVar(self, value='2002-01-01', name='start_date')
+        self.start_date = tk.StringVar(self, value='2002', name='start_date')
         self.end_date = tk.StringVar(self, value='2014-01-01', name='end_date')
-        self.window_length = tk.StringVar(self, value="12", name='duration')
+        self.window_length = tk.StringVar(self, value="6", name='duration')
         self.criterion = tk.StringVar(self, value="StartEnd", name='criterion')
         self.criterion_value = tk.StringVar(self, value="7", name='criterion_value')
         self.start_level = tk.DoubleVar(self, value=-0.1, name='start_level')
@@ -418,6 +449,7 @@ class StabilvolFrame(ttk.Frame):
         self.tau_min = tk.IntVar(self, value=2, name='tau_min')
         self.tau_max = tk.IntVar(self, value=10000, name='tau_max')
         self.nbins = tk.IntVar(self, value=3000, name='nbins')
+        self.stack = tk.BooleanVar(self, value=False, name='stack')
         self.save = tk.BooleanVar(self, value=False, name='save')
 
         # Objects
@@ -447,6 +479,7 @@ class StabilvolFrame(ttk.Frame):
         # Col 3
         self.thresholdsinputs = ThresholdFrame(self, col=3, row=1)
         self.nbinsinput = NbinsFrame(self, col=3, row=2)
+        self.stackinput = StackChoiceFrame(self, col=3, row=3)
 
         # Buttons
         # Show selected stocks
@@ -462,7 +495,8 @@ class StabilvolFrame(ttk.Frame):
         self.btn_mfht = ttk.Button(self, text='Show MFHT', width=10, command=self.show_mfht, state=tk.DISABLED)
         self.btn_mfht.grid(column=2, row=7, columnspan=2, sticky=tk.EW, padx=5, pady=5)
         # Save series
-        self.btn_save = ttk.Button(self, text='Save series to csv', width=10, command=self.save_series, state=tk.DISABLED)
+        self.btn_save = ttk.Button(self, text='Save series to csv', width=10, command=self.save_series,
+                                   state=tk.DISABLED)
         self.btn_save.grid(column=2, row=8, columnspan=2, sticky=tk.EW, padx=5, pady=5)
 
         # Inputs frame
@@ -487,12 +521,22 @@ class StabilvolFrame(ttk.Frame):
             "criterion_value": self.criterion_value.get(),
             "start_level": self.start_level.get(),
             "end_level": self.end_level.get(),
-            "tau_min":  self.tau_min.get(),
-            "tau_max":  self.tau_max.get(),
+            "tau_min": self.tau_min.get(),
+            "tau_max": self.tau_max.get(),
             "nbins": self.nbins.get(),
+            "stack": self.stack.get(),
             "save": self.save.get(),
         }
         return inputs_dict
+
+    @property
+    def input_iterator(self):
+        inputs_to_iterate = [
+            self.inputs["markets"],
+            self.inputs["start_date"],
+            self.inputs["duration"]
+        ]
+        return itertools.product(*inputs_to_iterate)
 
     @property
     def multiple_markets(self):
@@ -515,26 +559,30 @@ class StabilvolFrame(ttk.Frame):
         self.btn_fht['state'] = tk.DISABLED
         self.btn_mfht['state'] = tk.DISABLED
         self.btn_save['state'] = tk.DISABLED
-        if len(self.inputs['markets']) > 0:
+        if len(self.inputs['markets']) <= 0:
+            messagebox.showerror(title="No market selected!", message="Select at least one market.")
+        else:
             # Initialize DataExtractor
             self.accountant._criterion = self.inputs['criterion']
             self.accountant._value = self.inputs['criterion_value']
-            for start_date in self.inputs['start_date']:
-                for duration in self.inputs['duration']:
-                    self.accountant.start_date, self.accountant.end_date, self.accountant.duration = self.accountant.check_dates(
-                        start_date, None, duration
-                    )
-                    for market in self.inputs['markets']:
-                        data = self.accountant.extract_data(self.container.root / f'data/interim/{market}.pickle')
-                        stocks.extend(list(data.columns))  # Add market stocks to list
-                        self.stocks.set(stocks)  # Set stocks variable for the returnselection listbox
-                        self.datas.append(data)
-                        if show:
-                            self.accountant.plot_selection(edit=True).set_title(f"{market} selected stocks")
-                            plt.show()
-        else:
-            messagebox.showerror(title="No market selected!",
-                                 message="Select at least one market.")
+            for market, start_date, duration in self.input_iterator:
+                print(f'{market} - {start_date} - {duration}')
+                # Check if starting date and duration are set up correctly
+                start_date, end_date, duration = self.accountant.check_dates(
+                    start_date, None, duration
+                )
+                # Update DataExtractor time window
+                self.accountant.start_date = start_date
+                self.accountant.end_date = end_date
+                self.accountant.duration = duration
+                # Extract data
+                data = self.accountant.extract_data(self.container.root / f'data/interim/{market}.pickle')
+                stocks.extend(list(data.columns))  # Add market stocks to list
+                self.stocks.set(stocks)  # Set stocks variable for the returnselection Listbox
+                self.datas.append(data)
+                if show:
+                    self.accountant.plot_selection(edit=True).set_title(f"{market} selected stocks")
+                    plt.show()
         return None
 
     def show_returns(self, event):
@@ -554,46 +602,95 @@ class StabilvolFrame(ttk.Frame):
         return None
 
     def start_counting(self):
+        """
+        Count FHT and make data available in list self.stabilvols.
+        """
+        self.stabilvols = []
+        self.stabilvols_binned = []
         self.updates_input_label()
         self.analyst.start_level = self.inputs['start_level']
         self.analyst.end_level = self.inputs['end_level']
         self.analyst.tau_min = self.inputs['tau_min']
         self.analyst.tau_max = self.inputs['tau_max']
-        if len(self.inputs['markets']) > 0:
+        if len(self.inputs['markets']) <= 0:
+            messagebox.showerror(title="No market selected!", message="Select at least one market.")
+        else:
             if len(self.datas) == 0:
+                # Datas are not extracted yet,
+                # extract but don't show result
                 self.select_stocks(show=False)
-            for data in self.datas:
-                stabilvol = self.analyst.get_stabilvol(data)
+            for i, inputs in enumerate(self.input_iterator):
+                market = inputs[0]
+                start = inputs[1]
+                duration = inputs[2]
+                stabilvol = self.analyst.get_stabilvol(self.datas[i])
+                stabilvol['Market'] = market
+                stabilvol['Start date'] = start
+                stabilvol['Window length'] = duration
                 self.stabilvols.append(stabilvol)
+            # Enable buttons to show/save results
             self.btn_fht['state'] = tk.NORMAL
             self.btn_mfht['state'] = tk.NORMAL
-            self.btn_save['state'] = tk.NORMAL
-        else:
-            messagebox.showerror(title="No market selected!",
-                                 message="Select at least one market.")
+            # Trah extracted data
+            self.datas = []
+            print("Countitng finished. You can visualize results now.")
         return None
 
-    def show_fht(self):
-        for i, fht in enumerate(self.stabilvols):
-            market = self.inputs["markets"][i]
-            self.analyst.plot_fht(fht, title=f"{market}")
+    def show_fht(self, stack=False):
+        for i, inputs in enumerate(self.input_iterator):
+            market = inputs[0]
+            start_date = inputs[1]
+            duration = inputs[2]
+            fht = self.stabilvols[i]
+            self.analyst.plot_fht(fht, title=f"{market} FHT from {start_date} for {duration} years")
         return None
 
-    def show_mfht(self):
-        for i, stabilvol in enumerate(self.stabilvols):
+    def show_mfht(self, stack=False):
+        for i, inputs in enumerate(self.input_iterator):
+            market = inputs[0]
+            start = inputs[1]
+            duration = inputs[2]
+            stabilvol = self.stabilvols[i]
             stabilvol_binned = self.analyst.get_average_stabilvol(stabilvol, nbins=self.inputs['nbins'])
-            market = self.inputs["markets"][i] if self.multiple_markets else self.inputs["markets"][0]
-            ax = self.analyst.plot_mfht(stabilvol_binned, title=f"{market}", edit=True)
-            ax.set_xlim(0, 0.15)
+            stabilvol_binned['Market'] = market
+            stabilvol_binned['Start date'] = start
+            stabilvol_binned['Window length'] = duration
+            self.stabilvols_binned.append(stabilvol_binned)
+            if not self.inputs['stack']:
+                # Create plot and show it
+                ax = self.analyst.plot_mfht(
+                    stabilvol_binned,
+                    title=f"{market} MFHT from {start} for {duration} years",
+                    edit=True,
+                )
+                plt.show()
+        if self.inputs['stack']:
+            plot_title = f"Markets: {self.inputs['markets']} / " \
+                         f"Start dates: {self.inputs['start_date']} / " \
+                         f"Duration: {self.inputs['duration']}"
+            ax = self.analyst.plot_mfht(
+                *self.stabilvols_binned,
+                # title=plot_title,
+                edit=True,
+            )
             plt.show()
-            plt.show()
+        # Enable button to save serie
+        self.btn_save['state'] = tk.NORMAL
         return None
 
     def save_series(self):
-        for i, market in enumerate(self.inputs['markets']):
+        for i, inputs in enumerate(self.input_iterator):
+            market = inputs[0]
+            start_date = inputs[1]
+            duration = inputs[2]
+            start = str(self.inputs["start_level"]).replace('.', 'p').replace('-', 'n')
+            end = str(self.inputs["end_level"]).replace('.', 'p').replace('-', 'n')
+            nbins = self.inputs["nbins"]
+            fht_filename = f"{market}_{start_date}_{duration}_{start}_{end}"
+            mfht_filename = f"{market}_{start_date}_{duration}_{start}_{end}_{nbins}b"
             try:
-                self.analyst.save_fht(self.stabilvols[i], market)
-                self.analyst.save_mfht(self.mfhts[i], market)
+                self.analyst.save_fht(self.stabilvols[i], filename=fht_filename)
+                self.analyst.save_mfht(self.stabilvols_binned[i], filename=mfht_filename)
             except FileNotFoundError as e:
                 logging.warning(f"Error saving the file: {e}")
             else:
