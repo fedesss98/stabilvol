@@ -21,7 +21,7 @@ class StabilVolter:
             divergence_level=100,
             std_normalization=True,
             tau_min=2,
-            tau_max=700,
+            tau_max=300,
     ):
         """
         Creates StabilVolter object with FHT analysis parameters.
@@ -181,8 +181,8 @@ class StabilVolter:
         :param float divergence_limit:
         :return:
         """
-        start = threshold_start if threshold_start else self.threshold_start
-        end = threshold_end if threshold_end else self.threshold_end
+        start = threshold_start if threshold_start else self.threshold_start    # !!! Use std of the series
+        end = threshold_end if threshold_end else self.threshold_end            # to calculate thresholds
         divergence = divergence_limit if divergence_limit else self.divergence_limit
         try:
             date_ranges = self.date_ranges[series.name]
@@ -193,13 +193,14 @@ class StabilVolter:
             chunck = series.loc[interval[0]: interval[1]]
             volatility = chunck.std()
             fht = len(chunck)
-            stabilvol_list.append((volatility, fht))
+            if self.tau_min <= fht <= self.tau_max:
+                stabilvol_list.append((volatility, fht))
         self.stabilvol = pd.DataFrame.from_records(
             stabilvol_list, columns=['Volatility', 'FHT']
         )
         return self.stabilvol
 
-    def get_stabilvol(self, data=None, save=False) -> pd.DataFrame:
+    def get_stabilvol(self, data=None, save=False, **kwargs) -> pd.DataFrame:
         """
         Count First Hitting Times of entire DataFrame.
         Gaps in returns data are dropped.
@@ -226,15 +227,20 @@ class StabilVolter:
             stabilvol_list, columns=['Volatility', 'FHT']
         )
         logging.info(f"{len(analyzed_stocks)} Stocks analyzed.")
+        for key in kwargs.keys():
+            self.stabilvol[key] = kwargs.get(key)
         return self.stabilvol
 
     def get_average_stabilvol(self, stabilvol=None, nbins=50):
         stabilvol = self.stabilvol if stabilvol is None else stabilvol
+        info = [col for col in stabilvol.columns if col not in ['Volatility', 'FHT']]
         self.nbins = nbins
         volatility = stabilvol['Volatility']
         bins = np.linspace(0, volatility.max(), num=self.nbins)
         stabilvol_binned = stabilvol.groupby(pd.cut(volatility, bins=bins)).mean()
         self.stabilvol_binned = pd.DataFrame(stabilvol_binned)
+        for i in info:
+            self.stabilvol_binned[i] = str(stabilvol[i].unique())
         return stabilvol_binned
 
     def _plot_states(self):
@@ -266,41 +272,36 @@ class StabilVolter:
         plt.show()
         return ax
 
-    def plot_mfht(self, data_to_plot=None, title=None, ax=None, edit=False):
-        data_to_plot = data_to_plot if data_to_plot is not None else self.stabilvol_binned
-        if ax is None:
-            fig, ax = plt.subplots(figsize=(10, 6))
-            suptitle = "Mean First Hitting Times" if title is None else title
-            fig.suptitle(suptitle, fontsize=20)
-            ax.set_title(f"Thresholds: [ {self.threshold_start:.4} / {self.threshold_end:.4} ]",
-                         fontsize=16)
-        ax = sns.scatterplot(data_to_plot,
-                             x='Volatility',
-                             y='FHT',
-                             ax=ax)
-        ax.set_xlim(0, 0.15)
-        ax.set_yscale('log')
-        ax.grid()
-        plt.tight_layout()
-        if not edit:
-            plt.show()
-        return ax
-
-    def plot_mfht(self, title=None, edit=False, *data_to_plot):
+    def plot_mfht(self, *data_to_plot, title=None, edit=False, ):
+        if len(data_to_plot) == 0:
+            data_to_plot = self.stabilvol_binned
         data_to_plot = pd.concat(data_to_plot)
-        fig, ax = plt.subplots(figsize=(10, 6))
-        suptitle = "Mean First Hitting Times" if title is None else title
+        # fig, ax = plt.subplots(figsize=(10, 6))
+        markets = data_to_plot['Market'].unique()
+        starts = data_to_plot['Start date'].unique()
+        lengths = data_to_plot['Window length'].unique()
+        g = sns.relplot(data=data_to_plot,
+                        x='Volatility',
+                        y='FHT',
+                        col='Market',
+                        hue='Start date',
+                        style='Window length',)
+        fig = g.figure
+        suptitle = f"Thresholds: [ {self.threshold_start:.4} / {self.threshold_end:.4} ]" if title is None else title
         fig.suptitle(suptitle, fontsize=20)
-        ax.set_title(f"Thresholds: [ {self.threshold_start:.4} / {self.threshold_end:.4} ]",
-                     fontsize=16)
-        ax = sns.scatterplot(data_to_plot,
-                             x='Volatility',
-                             y='FHT',
-                             ax=ax)
-        ax.set_xlim(0, 0.15)
-        ax.set_yscale('log')
-        ax.grid()
-        plt.tight_layout()
+        axs = g.axes[0]
+        for ax, market in zip(axs, markets):
+            ax.set_xlim(0, 0.1)
+            ax.set_yscale('log')
+            ax.grid()
+            max_value = data_to_plot.loc[data_to_plot['Market'] == market]['FHT'].max()
+            ax.axhline(y=max_value, color='red', linestyle='--')
+            ax.text(0.1, max_value+4, f"Max: {max_value:.2f}", c='red')
+        g.add_legend()
+        g.tight_layout()
+        # ax.set_title(f"Thresholds: [ {self.threshold_start:.4} / {self.threshold_end:.4} ]",
+        #              fontsize=16)
+        # plt.tight_layout()
         if not edit:
             plt.show()
         return ax
