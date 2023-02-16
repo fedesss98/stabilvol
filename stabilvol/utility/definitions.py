@@ -12,6 +12,13 @@ DATA_ROOT = Path(
 
 # Available markets from Bloomberg
 MARKETS = {'GF', 'JT', 'LN', 'UN', 'UW'}
+MARKETS_STATS = {
+    'GF': ['Frankfurt Stock Exchange', 118],
+    'JT': ['Tokyo Stock Exchange', 4192],
+    'LN': ['London Stock Exchange', 3331],
+    'UN': ['New York Stock Exchange', 2744],
+    'UW': ['NASDAQ Global Select Market', 1588],
+}
 
 FIRST_VALID_DAY = '1980-01-01'
 LAST_VALID_DAY = '2022-07-01'

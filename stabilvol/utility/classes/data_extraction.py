@@ -16,7 +16,7 @@ import seaborn as sns
 
 try:
     from stabilvol.utility.classes.data_inspection import Window
-    from stabilvol.utility.definitions import ROOT
+    from stabilvol.utility.definitions import ROOT, MARKETS_STATS
 except ModuleNotFoundError as e:
     logging.warning(f"Error in data_extraction: {e}")
     from data_inspection import Window
@@ -31,7 +31,7 @@ class DataExtractor:
             start_date=None,
             end_date=None,
             duration=None,
-            sigma_range=(0.01, 1000),
+            sigma_range=(0.001, 1000),
             criterion='startend',
             criterion_value='6d',
     ):
@@ -122,8 +122,8 @@ class DataExtractor:
         :param pd.DataFrame df: DataFrame of stocks data
         :return: DataFrame with selected stocks
         """
-        window = Window(start=self.start_date, stop=self.end_date)
-        stocks_in_range = window.count_series(df, return_stocks=True, **self.criterion)
+        self.window = Window(start=self.start_date, stop=self.end_date)
+        stocks_in_range = self.window.count_series(df, return_stocks=True, **self.criterion)
         logging.info(f" - {len(stocks_in_range)} stocks selected with criterion {self.criterion}")
         df = df.loc[:, stocks_in_range]
         return df
@@ -190,9 +190,19 @@ class DataExtractor:
 
 
 if __name__ == "__main__":
-    market = 'UN'
-    accountant = DataExtractor(start_date='2002-01-01', duration=12, criterion_value=5)
+    market = 'UW'
+    start = None
+    end = None
+    criterion = 'percentage'
+    value = .0
+    sigma_range = (0, 1e5)
+    accountant = DataExtractor(start_date=start,
+                               end_date=end,
+                               criterion=criterion,
+                               criterion_value=value,
+                               sigma_range=sigma_range)
     data = accountant.extract_data(ROOT / f'data/interim/{market}.pickle')
     accountant.plot_selection()
     assert isinstance(data, pd.DataFrame)
     assert len(data.columns) > 0, "There are no data with selected criterion"
+    assert len(data.columns) == MARKETS_STATS[market][1], "There are less data than original dataframe"

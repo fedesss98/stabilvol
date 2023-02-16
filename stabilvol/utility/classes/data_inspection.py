@@ -30,7 +30,7 @@ class Window:
 
     @property
     def length(self):
-        return self._length
+        return self.interval.length
 
     def __repr__(self):
         return f'Window: start={self.left} - end:{self.right} (length: {self._length}))'
@@ -86,7 +86,7 @@ class Window:
     def percent_selection(df, threshold):
         # Select and count stocks with more data in slide than the threshold
         percentages_series = df.count() / len(df)
-        selected_stocks = df.loc[:, percentages_series > threshold].columns
+        selected_stocks = df.loc[:, percentages_series >= threshold].columns
         return selected_stocks.values
 
     @staticmethod
