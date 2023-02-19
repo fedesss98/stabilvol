@@ -5,6 +5,7 @@ Class to perform First Hitting Times counting
 
 import pandas as pd
 import matplotlib.pyplot as plt
+import multiprocessing as mp
 import numpy as np
 import seaborn as sns
 
@@ -21,7 +22,7 @@ class StabilVolter:
             divergence_level=100,
             std_normalization=True,
             tau_min=2,
-            tau_max=300,
+            tau_max=1e4,
     ):
         """
         Creates StabilVolter object with FHT analysis parameters.
@@ -40,13 +41,14 @@ class StabilVolter:
         # Counting times limits
         self.tau_min = tau_min
         self.tau_max = tau_max
+        # Bins for fht averaging
+        self.nbins = 1000
 
         # Initialize internal attributes
         self.root = Path(__file__).parent.parent.parent.parent
         self.data: pd.DataFrame = None
         self.data_states: pd.DataFrame = None
         self.stabilvol: pd.DataFrame = None
-        self.nbins = None
         self.stabilvol_binned = None
 
         # Print info
@@ -58,7 +60,7 @@ class StabilVolter:
         if not self._std_normalize:
             thresh = self._start
         elif not self.total_std:
-            logging.info("Starting threshold cannot be defined without data.")
+            logging.warning("Starting threshold cannot be defined without data.")
         else:
             thresh = self._start * self.total_std
         return thresh
@@ -94,86 +96,23 @@ class StabilVolter:
             total_std = self.data.std().sum() / len(self.data.std())
         return total_std
 
-    @staticmethod
-    def _set_stock_states(series, start, end):
-        """
-        Return the state of one return,
-        +1 if it is over the starting threshold,
-        0 if it is between the thresholds,
-        -1 if it is under the ending threshold
-
-        :param series: value of a stocl returns
-        :param start: starting threshold
-        :param end: ending threshold
-        :return: state of the value [+1, -1 or 0]
-        """
-        series_iterator = np.nditer(series, flags=['c_index'])
-        states = np.zeros(series.shape, dtype=np.int8)
-        counting = False
-        for x in series_iterator:
-            i = series_iterator.index
-            if x > start and not counting:
-                states[i] = 1
-                counting = True
-            elif x < end and counting:
-                states[i] = -1
-                counting = False
-        return states
-
-    def _make_states(self):
-        """
-        Transform returns DataFrame in states DataFrame,
-        where every state indicate if the return is over,
-        under, or between the thresholds.
-
-        :return: None
-        """
-        states = self.data.apply(
-            self._set_stock_states, start=self.threshold_start, end=self.threshold_end
-        )
-        self.data_states = states.copy()
-        return None
-
-    @staticmethod
-    def _select_date_ranges(series, start, end) -> list:
-        """
-        Select start and end date where returns change
-        from the starting threshold to the ending threshold
-
-        :param series: Returns series
-        :param start: Starting Threshold
-        :param end: Ending Threshold
-        :return: date_ranges: list of tuples with (start_date, end_date)
-        """
-        date_ranges = []
-        counting = False
-        for i, x in series.items():
-            if x > start and not counting:
-                start_index = i
-                counting = True
-            elif x < end and counting:
-                end_index = i
-                date_ranges.append((start_index, end_index))
-                counting = False
-        return date_ranges
-
-    def _make_date_ranges(self) -> pd.DataFrame:
-        """
-        Makes a DataFrame with date ranges for every stock.
-
-        :return: date_ranges: DataFrame
-        """
-        date_ranges = self.data.apply(
-            self._select_date_ranges, start=self.threshold_start, end=self.threshold_end
-        )
-        self.date_ranges = date_ranges.copy()
-        return date_ranges
+    @property
+    def inputs(self) -> dict:
+        input_dict = {
+            'threshold_start': self._start,
+            'threshold_end': self._end,
+            'divergence': self._divergence,
+            'tau_min': self.tau_min,
+            'tau_max': self.tau_max,
+            'nbins': self.nbins,
+        }
+        return input_dict
 
     def count_stock_fht(
             self, series, threshold_start=None, threshold_end=None, divergence_limit=None
     ):
         """
-        Count First Hitting Times of one stock prices series.
+        Count First Hitting Times of one stock returns series.
 
         :param pd.Series series:
         :param float threshold_start:
@@ -181,26 +120,40 @@ class StabilVolter:
         :param float divergence_limit:
         :return:
         """
-        start = threshold_start if threshold_start else self.threshold_start    # !!! Use std of the series
-        end = threshold_end if threshold_end else self.threshold_end            # to calculate thresholds
-        divergence = divergence_limit if divergence_limit else self.divergence_limit
-        try:
-            date_ranges = self.date_ranges[series.name]
-        except IndexError:
-            date_ranges = self._select_date_ranges(series, start=start, end=end)
-        stabilvol_list = list()
-        for interval in date_ranges[series.name]:
-            chunck = series.loc[interval[0]: interval[1]]
-            volatility = chunck.std()
-            fht = len(chunck)
-            if self.tau_min <= fht <= self.tau_max:
-                stabilvol_list.append((volatility, fht))
-        self.stabilvol = pd.DataFrame.from_records(
-            stabilvol_list, columns=['Volatility', 'FHT']
-        )
-        return self.stabilvol
+        start_level = threshold_start if threshold_start is not None else self.threshold_start
+        end_level = threshold_end if threshold_end is not None else self.threshold_end
+        divergence_limit = divergence_limit if divergence_limit is not None else self.divergence_limit
+        # Make series continuous
+        if isinstance(series, pd.Series):
+            series = series.dropna().values
+        elif isinstance(series, np.ndarray):
+            series = series[~np.isnan(series)]
+        else:
+            raise ValueError("Strange series")
+        counting = False
+        fht = []
+        volatility = []
+        # Ignore datetime indexes for iteration, use only integers
+        for t, level in enumerate(series):
+            if not counting and start_level <= level < divergence_limit:
+                # Start counting
+                counting = True
+                start_t = t
+            if counting and level < end_level:
+                # Stop counting and take FHT
+                counting = False
+                end_t = t
+                counting_time = end_t - start_t
+                if self.tau_min <= counting_time <= self.tau_max:
+                    # Append FHT and Volatility
+                    local_volatility = series[start_t: end_t].std(ddof=1)
+                    fht.append(counting_time)
+                    volatility.append(local_volatility)
+        # Gather data in a DataFrame
+        stock_stabilvol = np.array([volatility, fht])
+        return stock_stabilvol
 
-    def get_stabilvol(self, data=None, save=False, **kwargs) -> pd.DataFrame:
+    def get_stabilvol(self, data=None, method='pandas', **frame_info) -> pd.DataFrame:
         """
         Count First Hitting Times of entire DataFrame.
         Gaps in returns data are dropped.
@@ -209,35 +162,31 @@ class StabilVolter:
         :param bool save: Save FHT to file
         :return: Series with FHTs
         """
-        logging.info("Starting stability analysis.")
-        if data is not None:
-            self.data = data
-        # Take date ranges for starting and ending counts
-        date_ranges = self._make_date_ranges()
-        analyzed_stocks = list()
-        stabilvol_list = list()
-        for stock, series in self.data.items():
-            analyzed_stocks.append(stock)
-            for interval in date_ranges[stock]:
-                chunk = series.loc[interval[0]: interval[1]].dropna()  # Drop null values
-                volatility = chunk.std()
-                fht = len(chunk)
-                stabilvol_list.append((volatility, fht))
-        self.stabilvol = pd.DataFrame.from_records(
-            stabilvol_list, columns=['Volatility', 'FHT']
-        )
-        logging.info(f"{len(analyzed_stocks)} Stocks analyzed.")
-        for key in kwargs.keys():
-            self.stabilvol[key] = kwargs.get(key)
+        logging.info("Starting FHT counting.")
+        self.data = data if data is not None else self.data
+        if method == 'pandas':
+            data.apply(self.count_stock_fht)
+        elif method == 'multi':
+            # Multiprocessing method (faster)
+            pool = mp.Pool(processes=mp.cpu_count()-1)
+            result = pool.map(self.count_stock_fht, [self.data[col].values for col in self.data.columns])
+            pool.close()
+            self.stabilvol = pd.DataFrame(np.concatenate(result, axis=1).T, columns=['Volatility', 'FHT'])
+        else:
+            # Numpy method
+            np.apply_along_axis(self.count_stock_fht, 0, self.data.values)
+        # stabilvol = stabilvol_frame.melt(ignore_index=False, value_name='FHT', var_name='Stock').dropna()
+        for info in frame_info.keys():
+            self.stabilvol[info] = frame_info[info]
         return self.stabilvol
 
     def get_average_stabilvol(self, stabilvol=None, nbins=50):
         stabilvol = self.stabilvol if stabilvol is None else stabilvol
         info = [col for col in stabilvol.columns if col not in ['Volatility', 'FHT']]
         self.nbins = nbins
-        volatility = stabilvol['Volatility']
-        bins = np.linspace(0, volatility.max(), num=self.nbins)
-        stabilvol_binned = stabilvol.groupby(pd.cut(volatility, bins=bins)).mean()
+        stabilvol_filtered = stabilvol.loc[stabilvol['Volatility'] <= .5]
+        bins = np.linspace(0, .5, num=self.nbins)
+        stabilvol_binned = stabilvol_filtered.groupby(pd.cut(stabilvol_filtered['Volatility'], bins=bins)).mean()
         self.stabilvol_binned = pd.DataFrame(stabilvol_binned)
         for i in info:
             self.stabilvol_binned[i] = str(stabilvol[i].unique())
@@ -257,7 +206,7 @@ class StabilVolter:
         return ax
 
     def plot_fht(self, data_to_plot=None, title=None):
-        data_to_plot = self.stabilvol if data_to_plot is None else data_to_plot
+        data_to_plot = data_to_plot if data_to_plot is not None else self.stabilvol
         fig, ax = plt.subplots(figsize=(10, 6))
         suptitle = "First Hitting Times" if title is None else title
         fig.suptitle(suptitle, fontsize=20)
@@ -266,15 +215,16 @@ class StabilVolter:
         sns.scatterplot(data_to_plot,
                         x='Volatility',
                         y='FHT')
-        ax.set_yscale('log')
+        ax.set_xlim(0, 0.1)
         ax.grid()
         plt.tight_layout()
         plt.show()
-        return ax
+        return None
 
-    def plot_mfht(self, *data_to_plot, title=None, edit=False, ):
+    def plot_mfht(self, *data_to_plot, title=None, x_range=None, edit=False, ):
         if len(data_to_plot) == 0:
-            data_to_plot = self.stabilvol_binned
+            data_to_plot = [self.stabilvol_binned]
+        data_to_plot = [mfht[mfht['Volatility'].between(*x_range)] for mfht in data_to_plot]
         data_to_plot = pd.concat(data_to_plot)
         # fig, ax = plt.subplots(figsize=(10, 6))
         markets = data_to_plot['Market'].unique()
@@ -285,18 +235,21 @@ class StabilVolter:
                         y='FHT',
                         col='Market',
                         hue='Start date',
-                        style='Window length',)
+                        style='Window length',
+                        aspect=1.2,
+                        facet_kws={'legend_out': True,
+                                   'xlim': x_range,}
+                        )
         fig = g.figure
-        suptitle = f"Thresholds: [ {self.threshold_start:.4} / {self.threshold_end:.4} ]" if title is None else title
+        suptitle = f"MFHT with Thresholds: [ {self._start:.4} / {self._end:.4} ]" if title is None else title
         fig.suptitle(suptitle, fontsize=20)
         axs = g.axes[0]
         for ax, market in zip(axs, markets):
-            ax.set_xlim(0, 0.1)
-            ax.set_yscale('log')
+            # ax.set_yscale('log')
             ax.grid()
             max_value = data_to_plot.loc[data_to_plot['Market'] == market]['FHT'].max()
             ax.axhline(y=max_value, color='red', linestyle='--')
-            ax.text(0.1, max_value+4, f"Max: {max_value:.2f}", c='red')
+            ax.text(x_range[1]+0.01, max_value, f"Max: {max_value:.2f}", c='red')
         g.add_legend()
         g.tight_layout()
         # ax.set_title(f"Thresholds: [ {self.threshold_start:.4} / {self.threshold_end:.4} ]",
@@ -348,6 +301,9 @@ if __name__ == "__main__":
     start_level = 0.5
     end_level = -0.5
     analyst = StabilVolter(start_level=start_level, end_level=end_level)
+    analyst.data = data
+    # Check last stabilvol
+    # stabilvol1 = analyst.count_stock_fht(data.iloc[:, 2])
     stabilvol = analyst.get_stabilvol(data)
     given_stabilvol = np.array([
         [np.sqrt(2), 2],

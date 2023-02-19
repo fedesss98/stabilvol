@@ -28,12 +28,12 @@ logging.basicConfig(format='%(levelname)s: %(asctime)s - %(message)s', level=log
 class DataExtractor:
     def __init__(
             self,
-            start_date=None,
-            end_date=None,
-            duration=None,
-            sigma_range=(0.001, 1000),
-            criterion='startend',
-            criterion_value='6d',
+            start_date: str = None,
+            end_date: str = None,
+            duration: int = None,
+            sigma_range: tuple = (0.001, 1000),
+            criterion: str = 'startend',
+            criterion_value: str | int | float = '6d',
     ):
         """
         Initialize Data Extractor.
@@ -41,7 +41,7 @@ class DataExtractor:
         :param str start_date:
         :param str end_date:
         :param int duration: Number of years
-        :param list sigma_range: Standard Deviation range for regular stocks
+        :param tuple sigma_range: Standard Deviation range for regular stocks
         :param str criterion: 'percentage' or 'startend'
         :param str | int | float criterion_value: threshold for the criterion
         """
@@ -65,6 +65,18 @@ class DataExtractor:
         self._criterion, self._value = self.__check_criterion(
             self._criterion, self._value)
         return {self._criterion: self._value}
+
+    @property
+    def inputs(self) -> dict:
+        inputs_dict = {
+            'start_date': self.start_date,
+            'end_date': self.end_date,
+            'duration': self.duration,
+            'min_stddev': self.min_sigma,
+            'max_stddev': self.max_sigma,
+            'selection_criterion': self.criterion,
+        }
+        return inputs_dict
 
     @staticmethod
     def check_dates(start, end, duration):
@@ -124,7 +136,6 @@ class DataExtractor:
         """
         self.window = Window(start=self.start_date, stop=self.end_date)
         stocks_in_range = self.window.count_series(df, return_stocks=True, **self.criterion)
-        logging.info(f" - {len(stocks_in_range)} stocks selected with criterion {self.criterion}")
         df = df.loc[:, stocks_in_range]
         return df
 
@@ -135,7 +146,7 @@ class DataExtractor:
         :param pd.DataFrame df: DataFrame of stocks data
         :return: DataFrame with selected stocks
         """
-        df = df.loc[:, (df.std() > self.min_sigma) & (df.std() < self.max_sigma)]
+        df = df.loc[:, df.std().between(*self._sigma_range)]
         return df
 
     def extract_data(self, filename: Path | str) -> pd.DataFrame:
@@ -158,6 +169,7 @@ class DataExtractor:
         df = self.__pick_stocks(df)
         # Take out stocks with too much variability
         df = self.__filter_variability(df)
+        logging.info(f" - {len(df.columns)} stocks selected with criterion {self.criterion}")
         self.data = df
         return df
 
