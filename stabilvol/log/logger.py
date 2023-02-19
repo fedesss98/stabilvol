@@ -1,20 +1,53 @@
-import neptune.new as neptune
+"""
+Creates log to link simulations (MFHTs vs Volatility)
+and parameters.
+"""
+import json
+import logging
+import datetime
+import random
+import string
 
 
 class Logger(dict):
+    def __init__(self):
+        self.log: dict = {}
+        self.inputs: dict = {}
+        self.id: str = '000000A'
+        logging.info("Logger created")
 
-    def upload(self):
-        run = neptune.init(
-            project="federico.amato/stabilizing-volatility",
-            api_token="eyJhcGlfYWRkcmVzcyI6Imh0dHBzOi8vYXBwLm5lcHR1bmUuYWkiLCJhcGlfdXJsIjoiaHR0cHM6Ly9hcHAubmVwdHVuZS5haSIsImFwaV9rZXkiOiJlZGRmMzMwNy03MTU1LTQ3NTItYWZkZC0yYTkxYzFiYWRlYTUifQ==",
-        )  # your credentials
+    def gather_inputs(self, *classes, **kwargs):
+        inputs = {'Date': str(datetime.datetime.now()),
+                  **kwargs}
+        for c in classes:
+            try:
+                inputs.update(c.inputs)
+            except Exception as e:
+                logging.warning("Unrecognized class: ", e)
+        self.inputs = inputs
+        return self.inputs
 
-        params = {"learning_rate": 0.001, "optimizer": "Adam"}
-        run["parameters"] = params
+    def save_log(self, *classes, **kwargs):
+        random_string = str(random.randint(0, 999999)).zfill(6)
+        random_letter = random.choice(string.ascii_uppercase)
+        self.id = random_string + random_letter
+        self.gather_inputs(*classes, **kwargs)
+        self.log = {self.id: self.inputs}
+        with open("logs.json", "a+") as logs_file:
+            json.dump(self.log, logs_file)
 
-        for epoch in range(10):
-            run["train/loss"].log(0.9 ** epoch)
 
-        run["eval/f1_score"] = 0.66
+if __name__ == '__main__':
+    from stabilvol.utility.classes.data_extraction import DataExtractor
+    from stabilvol.utility.classes.stability_analysis import StabilVolter
 
-        run.stop()
+    meta_data = {
+        'Market': 'UN',
+    }
+    accountant = DataExtractor()
+    analyst = StabilVolter()
+
+    logger = Logger()
+    logger.save_log(accountant, analyst, **meta_data)
+
+
