@@ -10,7 +10,7 @@ import logging
 
 try:
     from stabilvol.utility.classes.data_extraction import DataExtractor
-    from stabilvol.utility.classes.stability_analysis import StabilVolter
+    from stabilvol.utility.classes.stability_analysis import StabilVolter, MeanFirstHittingTimes
     from stabilvol.utility.definitions import MARKETS, FIRST_VALID_DAY, LAST_VALID_DAY
 except ModuleNotFoundError as e:
     logging.warning(f"Error in count_fht: {e}")
@@ -39,12 +39,13 @@ def main(markets,
                 start_date=start_date, duration=int(years), criterion=criterion, criterion_value=criterion_value
             )
             data = accountant.extract_data(DATABASE / f'interim/{market}.pickle')
-            accountant.plot_selection()
+            # accountant.plot_selection()
             analyst = StabilVolter(
                 start_level=start_level, end_level=end_level, tau_min=tau_min, tau_max=tau_max
             )
             stabilvol = analyst.get_stabilvol(data)
-            mfht = analyst.get_average_stabilvol(nbins=nbins)
+            # mfht = analyst.get_average_stabilvol(nbins=nbins)
+            mfht = MeanFirstHittingTimes(stabilvol, nbins=500)
             # Save
             if save:
                 analyst.save_fht(market)
@@ -72,7 +73,7 @@ if __name__ == "__main__":
     markets: list = ['UN']
     start_date = '2002-01-01'
     end_date = None
-    duration = 12
+    duration = 6
     nbins = 3000
     save = True
     start_time = time.time()  # to track execution time

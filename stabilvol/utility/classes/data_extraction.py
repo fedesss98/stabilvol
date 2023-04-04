@@ -45,9 +45,15 @@ class DataExtractor:
         :param str criterion: 'percentage' or 'startend'
         :param str | int | float criterion_value: threshold for the criterion
         """
-        self.start_date, self.end_date, self.duration = self.check_dates(
-            start_date, end_date, duration
-        )
+        self._start_date = None
+        self._end_date = None
+        self._duration = None
+        self.start_date = start_date
+        self.duration = duration
+        self.end_date = end_date
+        # self.start_date, self.end_date, self.duration = self.check_dates(
+        #     start_date, end_date, duration
+        # )
         self._sigma_range = sigma_range
         self.min_sigma = sigma_range[0]
         self.max_sigma = sigma_range[-1]
@@ -61,17 +67,75 @@ class DataExtractor:
         logging.info("DataExtractor created.")
 
     @property
+    def start_date(self):
+        return self._start_date
+
+    @start_date.setter
+    def start_date(self, value):
+        if value is not None and not isinstance(value, (str, type(pd.Timestamp(1)))):
+            raise TypeError('Expected string or pd.Timestamp object')
+        self._start_date = pd.Timestamp(value)
+        if self.duration is not None:
+            self._end_date = self._start_date + self.duration
+
+    @property
+    def end_date(self):
+        return self._end_date
+
+    @end_date.setter
+    def end_date(self, value):
+        if value is not None and not isinstance(value, (str, pd.Timestamp)):
+            raise TypeError('Expected string or pd.Timestamp object')
+        self._end_date = pd.Timestamp(value)
+        if self.duration is not None:
+            self.duration = self._end_date - self.start_date
+        return None
+
+    @property
+    def duration(self):
+        return self._duration
+
+    @duration.setter
+    def duration(self, value):
+        """
+        Duration serves only to set the end date for filtering dates
+        and in the Window creation.
+        :param value:
+        :return:
+        """
+        if value is None:
+            if self.end_date is not None:
+                self._duration = self._end_date - self.start_date
+            else:
+                self._duration = None
+                return None
+        elif not isinstance(value, (str, int)):
+            raise TypeError('Expected string or int for duration')
+        else:
+            self._duration = DateOffset(years=int(value))
+        if self._start_date is not None and self._end_date is pd.NaT:
+            self._end_date = self.start_date + self._duration
+
+    @property
     def criterion(self):
-        self._criterion, self._value = self.__check_criterion(
-            self._criterion, self._value)
+        self._criterion, self._value = self.__check_criterion(self._criterion, self._value)
         return {self._criterion: self._value}
+
+    @criterion.setter
+    def criterion(self, crit_obj):
+        if isinstance(crit_obj, tuple):
+            criterion, value = crit_obj
+        elif isinstance(crit_obj, dict):
+            # Take first key and value
+            criterion, value = next(iter(crit_obj.items()))
+        self._criterion, self._value = self.__check_criterion(criterion, value)
 
     @property
     def inputs(self) -> dict:
         inputs_dict = {
-            'start_date': self.start_date,
-            'end_date': self.end_date,
-            'duration': self.duration,
+            'start_date': str(self.start_date),
+            'end_date': str(self.end_date),
+            'duration': self.duration.years,
             'min_stddev': self.min_sigma,
             'max_stddev': self.max_sigma,
             'selection_criterion': self.criterion,
@@ -104,7 +168,7 @@ class DataExtractor:
                 value = 0.8
         elif criterion == 'startend':
             try:
-                int(value)
+                float(value)
                 # Then the value is in the shape of a number
                 value = str(value) + "d"
             except ValueError:
