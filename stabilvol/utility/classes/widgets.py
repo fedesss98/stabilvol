@@ -14,14 +14,14 @@ import itertools
 
 try:
     from stabilvol.utility.definitions import ROOT
-    from stabilvol.utility.styles import FONTS
+    from stabilvol.utility.styles import FONTS, STYLES
     from stabilvol.utility.classes.data_extraction import DataExtractor
     from stabilvol.utility.classes.stability_analysis import StabilVolter
     from stabilvol.analyze.count_fht import main as count_fht
 except ModuleNotFoundError as e:
     logging.warning(f"Error in count_fht imports: {e}")
     from utility.definitions import ROOT
-    from utility.styles import FONTS
+    from utility.styles import FONTS, STYLES
     from utility.classes.data_extraction import DataExtractor
     from utility.classes.stability_analysis import StabilVolter
     from analyze.count_fht import main as count_fht
@@ -39,36 +39,38 @@ class MarketSelectionFrame(ttk.Frame):
     """
 
     def __init__(self, container, col=1, row=1, rowspan=1):
-        super().__init__(container)
+        super().__init__(container, style='DarkFrame.TFrame')
+        self.controller = container.controller
 
-        self.frame_label = ttk.Label(self, text="Markets", font=FONTS['h4'])
+        self.frame_label = ttk.Label(self, text="Markets", font=FONTS['h4'], style='DarkFrame.TLabel')
         self.frame_label_help = ttk.Label(
-            self,
+            self, font=FONTS['p-help'], width=32, style='DarkFrame.TLabel',
             text="Select one or more Markets from the list",
-            font=FONTS['p-help'],
         )
 
         self._markets = tk.Variable(value=list(MARKETS))
         self.markets_list = tk.Listbox(
             self,
-            listvariable=container.available_markets,
+            listvariable=self.controller.available_markets,
             height=len(MARKETS),
             selectmode=tk.EXTENDED,
             exportselection=0,
-            font=FONTS['p'],
+            font=self.controller.style.p,
         )
         # Colorize alternating lines of the listbox
         for i in range(0, len(MARKETS), 2):
             self.markets_list.itemconfigure(i, background='#f0f0ff')
 
         # Binding market data extraction to left mouse double click
-        self.markets_list.bind('<Double-Button-1>', container.select_stocks)
+        self.markets_list.bind('<Double-Button-1>', self.controller.select_stocks)
+        # Binding market info to market click
+        self.markets_list.bind('<<ListboxSelect>>', self.controller.describe_selected_market)
         # Place Widgets
         self.frame_label.grid(column=0, row=0, sticky=tk.W)
         self.frame_label_help.grid(column=0, row=1, sticky=tk.W)
         self.markets_list.grid(column=0, row=2, sticky=tk.EW)
         # Place Frame.
-        self.grid(column=col, row=row, rowspan=rowspan, padx=5, pady=5, sticky=tk.W)
+        self.grid(column=col, row=row, rowspan=rowspan, padx=(20, 10), pady=(30, 10), sticky=tk.W)
 
     @property
     def markets(self):
@@ -81,22 +83,22 @@ class WindowsTextFrame(ttk.Frame):
     You can enter the lengths of the windows to use.
     """
 
-    def __init__(self, container, col, row):
-        super().__init__(container)
+    def __init__(self, controller, col, row):
+        super().__init__(controller)
 
         self.frame_label = ttk.Label(self, text="Windows", font=FONTS['h4'])
         self.frame_label_help = ttk.Label(
             self, font=FONTS['p-help'], wraplength=250,
             text="Select the lengths of the Windows, separated by a comma.",
         )
-        self.window_lengths = tk.Entry(self, textvariable=container.window_length)
+        self.window_lengths = tk.Entry(self, textvariable=controller.window_length, **STYLES['border'])
         # self.window_lengths.insert('1.0', "10")
         # Place Widgets
         self.frame_label.grid(column=0, row=0, sticky=tk.W)
         self.frame_label_help.grid(column=0, row=1, sticky=tk.W)
         self.window_lengths.grid(column=0, row=2, sticky=tk.W)
         # Place Frame.
-        self.grid(column=col, row=row, padx=5, pady=5, sticky=tk.W)
+        self.grid(column=col, row=row, padx=20, pady=20, sticky=tk.W)
 
 
 class StartTextFrame(ttk.Frame):
@@ -104,21 +106,21 @@ class StartTextFrame(ttk.Frame):
     Frame to select the starting date for the Window.
     """
 
-    def __init__(self, container, col, row):
-        super().__init__(container)
+    def __init__(self, controller, col, row):
+        super().__init__(controller)
 
         self.frame_label = ttk.Label(self, text="Start Date", font=FONTS['h4'])
         self.frame_label_help = ttk.Label(
             self, font=FONTS['p-help'], wraplength=250,
             text="Insert the starting date for the windows (YYYY-MM-DD)",
         )
-        self.start_string = tk.Entry(self, textvariable=container.start_date, width=15)
+        self.start_string = tk.Entry(self, textvariable=controller.start_date, width=15, **STYLES['border'])
         # Place Widgets
         self.frame_label.grid(column=0, row=0, sticky=tk.W)
         self.frame_label_help.grid(column=0, row=1, sticky=tk.W)
         self.start_string.grid(column=0, row=2, sticky=tk.W)
         # Place Frame.
-        self.grid(column=col, row=row, padx=5, pady=5, sticky=tk.W)
+        self.grid(column=col, row=row, padx=20, pady=20, sticky=tk.W)
 
     @property
     def start_date(self):
@@ -126,8 +128,8 @@ class StartTextFrame(ttk.Frame):
 
 
 class EndTextFrame(ttk.Frame):
-    def __init__(self, container, col, row):
-        super().__init__(container)
+    def __init__(self, controller, col, row):
+        super().__init__(controller)
 
         self.frame_label = ttk.Label(self, text="End Date", font=FONTS['h4'])
         self.frame_label_help = ttk.Label(
@@ -135,7 +137,7 @@ class EndTextFrame(ttk.Frame):
             text="Insert the ending date for the windows (YYYY-MM-DD or YYYY)",
             font=FONTS['p-help'],
         )
-        self.start_string = tk.Entry(self, textvariable=container.end_date)
+        self.start_string = tk.Entry(self, textvariable=controller.end_date, **STYLES['border'])
         # Place Widgets
         self.frame_label.grid(column=0, row=0, sticky=tk.W)
         self.frame_label_help.grid(column=0, row=1, sticky=tk.W)
@@ -152,8 +154,7 @@ class CriterionDropdownFrame(ttk.Frame):
 
     def __init__(self, container, col, row):
         super().__init__(container)
-
-        self.container = container
+        self.controller = container.controller
 
         self.frame_label = ttk.Label(self, text="Criterion", font=FONTS['h4'])
         self.frame_label_help = ttk.Label(
@@ -162,15 +163,15 @@ class CriterionDropdownFrame(ttk.Frame):
                  "(Float for Percentage and int number of days for StartEnd)",
         )
         # Help with the criterion value
-        self._value_label_help = tk.StringVar(self, value='Days')
+        self._value_label_help = tk.StringVar(self, value='Days:')
         self.value_label_help = ttk.Label(
             self, font=FONTS['p-help'], textvariable=self._value_label_help
         )
         self.criterion_selection = ttk.Combobox(self,
                                                 state='readonly',
                                                 values=["Percentage", "StartEnd"],
-                                                textvariable=container.criterion)
-        self.value_input = tk.Entry(self, textvariable=container.criterion_value, width=10)
+                                                textvariable=self.controller.criterion)
+        self.value_input = tk.Entry(self, textvariable=self.controller.criterion_value, width=10, **STYLES['border'])
         # Bind change in combox with change in help for criterion value
         self.criterion_selection.bind('<<ComboboxSelected>>', self.update_help)
         # Place Widgets
@@ -178,15 +179,15 @@ class CriterionDropdownFrame(ttk.Frame):
         self.frame_label_help.grid(column=0, row=1, columnspan=2, sticky=tk.W)
         self.criterion_selection.grid(column=0, row=2, columnspan=2, sticky=tk.NW)
         self.value_label_help.grid(column=0, row=3, sticky=tk.NW, pady=4)
-        self.value_input.grid(column=1, row=3, sticky=tk.NW, pady=4)
+        self.value_input.grid(column=0, row=4, sticky=tk.NW, pady=4)
         # Place Frame
-        self.grid(column=col, row=row, padx=5, pady=5, sticky=tk.W)
+        self.grid(column=col, row=row, padx=20, pady=(15, 12), sticky=tk.NSEW)
 
     def update_help(self, event):
-        if self.container.criterion.get() == "StartEnd":
-            self._value_label_help.set("Days")
-        elif self.container.criterion.get() == "Percentage":
-            self._value_label_help.set("Fraction")
+        if self.controller.criterion.get() == "StartEnd":
+            self._value_label_help.set("Days:")
+        elif self.controller.criterion.get() == "Percentage":
+            self._value_label_help.set("Fraction:")
 
 
 class SlideChoiceFrame(ttk.Frame):
@@ -195,8 +196,8 @@ class SlideChoiceFrame(ttk.Frame):
     You can enter the lengths of the windows to use.
     """
 
-    def __init__(self, container, col, row):
-        super().__init__(container)
+    def __init__(self, controller, col, row):
+        super().__init__(controller)
 
         self.frame_label = ttk.Label(self, text="Slide", font=FONTS['h4'])
         self._slide_choice = tk.StringVar()
@@ -248,13 +249,13 @@ class SaveChoiceFrame(ttk.Frame):
     You can enter the lengths of the windows to use.
     """
 
-    def __init__(self, container, col, row):
-        super().__init__(container)
+    def __init__(self, controller, col, row):
+        super().__init__(controller)
 
         self.frame_label = ttk.Label(self, text="Save", font=FONTS['h4'])
         self._save_choice = tk.BooleanVar(self, value=False)
-        self.yes_choice = ttk.Radiobutton(self, text="Yes", value=True, variable=container.save)
-        self.no_choice = ttk.Radiobutton(self, text="No", value=False, variable=container.save)
+        self.yes_choice = ttk.Radiobutton(self, text="Yes", value=True, variable=controller.save)
+        self.no_choice = ttk.Radiobutton(self, text="No", value=False, variable=controller.save)
         # Place Widgets
         self.frame_label.grid(column=0, row=0, sticky=tk.W)
         self.yes_choice.grid(column=0, row=1, sticky=tk.EW)
@@ -272,11 +273,11 @@ class StartLevelTextFrame(ttk.Frame):
     Frame to select the starting threshold for FHT counting.
     """
 
-    def __init__(self, container, col, row, variable):
-        super().__init__(container)
+    def __init__(self, controller, col, row, variable):
+        super().__init__(controller)
         self.variable = variable if variable else tk.StringVar()
         self.frame_label = ttk.Label(self, text="Start Level: ", font=FONTS['p-help'])
-        self.start_string = tk.Entry(self, textvariable=variable, width=8)
+        self.start_string = tk.Entry(self, textvariable=variable, width=8, **STYLES['border'])
         # Place Widgets
         self.frame_label.grid(column=0, row=0, sticky=tk.W)
         self.start_string.grid(column=1, row=0, sticky=tk.W, padx=2)
@@ -289,11 +290,11 @@ class EndLevelTextFrame(ttk.Frame):
     Frame to select the ending threshold for FHT counting.
     """
 
-    def __init__(self, container, col, row, variable=None):
-        super().__init__(container)
+    def __init__(self, controller, col, row, variable=None):
+        super().__init__(controller)
         self.variable = variable if variable else tk.StringVar()
         self.frame_label = ttk.Label(self, text="End Level:  ", font=FONTS['p-help'])
-        self.end_string = tk.Entry(self, textvariable=self.variable, width=8)
+        self.end_string = tk.Entry(self, textvariable=self.variable, width=8, **STYLES['border'])
         # Place Widgets
         self.frame_label.grid(column=0, row=0, sticky=tk.W)
         self.end_string.grid(column=1, row=0, sticky=tk.W, padx=2)
@@ -302,8 +303,11 @@ class EndLevelTextFrame(ttk.Frame):
 
 
 class ThresholdFrame(ttk.Frame):
+    """ Unified container for StartLevel and EndLevel entries """
+
     def __init__(self, container, col, row):
         super().__init__(container)
+        self.controller = container.controller
 
         self.frame_label = ttk.Label(self, text="Thresholds", font=FONTS['h4'])
         self.frame_label_help = ttk.Label(
@@ -313,55 +317,60 @@ class ThresholdFrame(ttk.Frame):
         # Place widgets
         self.frame_label.grid(column=0, row=0, columnspan=2, sticky=tk.W)
         self.frame_label_help.grid(column=0, row=1, columnspan=2, sticky=tk.W)
-        self.start = StartLevelTextFrame(self, col=0, row=2, variable=container.start_level)
-        self.end = EndLevelTextFrame(self, col=0, row=3, variable=container.end_level)
+        self.start = StartLevelTextFrame(self, col=0, row=2, variable=self.controller.start_level)
+        self.end = EndLevelTextFrame(self, col=0, row=3, variable=self.controller.end_level)
         # Place Frame
-        self.grid(column=col, row=row, padx=5, pady=5, sticky=tk.W)
+        self.grid(column=col, row=row, padx=20, pady=12, sticky=tk.NSEW)
 
 
 class NbinsFrame(ttk.Frame):
     def __init__(self, container, col, row):
         super().__init__(container)
+        self.controller = container.controller
 
         self.frame_label = ttk.Label(self, text="Number of bins", font=FONTS['h4'])
         self.frame_label_help = ttk.Label(
             self, font=FONTS['p-help'], wraplength=250,
             text="Insert the number of bins in which to average the FHT",
         )
-        self.start_string = tk.Entry(self, textvariable=container.nbins)
+        self.num_bins = tk.Entry(self, textvariable=self.controller.nbins, **STYLES['border'])
         # Place Widgets
         self.frame_label.grid(column=0, row=0, sticky=tk.W)
         self.frame_label_help.grid(column=0, row=1, sticky=tk.W)
-        self.start_string.grid(column=0, row=2, sticky=tk.W)
+        self.num_bins.grid(column=0, row=2, sticky=tk.W)
         # Place Frame.
-        self.grid(column=col, row=row, padx=5, pady=5, sticky=tk.W)
+        self.grid(column=col, row=row, padx=20, pady=12, sticky=tk.NSEW)
 
 
 class StackChoiceFrame(ttk.Frame):
     """
-    Windows selection Frame.
-    You can enter the lengths of the windows to use.
+    Choose wether to stack graph on one column or plot them separately.
     """
 
     def __init__(self, container, col, row):
         super().__init__(container)
+        self.controller = container.controller
+
         # Insert separator before widget
-        ttk.Separator(self, orient=tk.HORIZONTAL).grid(column=0, row=0, ipadx=150, pady=10)
+        ttk.Separator(self, orient=tk.HORIZONTAL).grid(column=0, row=0, ipadx=150, pady=10, sticky=tk.EW)
 
         self.frame_label = ttk.Label(self, text="Stack plots", font=FONTS['h4'])
         self.frame_label_help = ttk.Label(
-            self, font=FONTS['p-help'], wraplength=250,
-            text="Stack multiple plots on the same chart or view them separately",
+            self, font=FONTS['p-help'], wraplength=300,
+            text="Select the variable on which to stack the plots:"
         )
-        self.yes_choice = ttk.Radiobutton(self, text="Yes", value=True, variable=container.stack)
-        self.no_choice = ttk.Radiobutton(self, text="No", value=False, variable=container.stack)
+        stack_options = ["Nothing", "Market", "Start date", "Window length"]
+        self.stack_select = ttk.Combobox(self,
+                                         state="readonly",
+                                         values=stack_options,
+                                         textvariable=self.controller.stack)
+        self.controller.stack.set(stack_options[0])
         # Place Widgets
         self.frame_label.grid(column=0, row=1, sticky=tk.W)
         self.frame_label_help.grid(column=0, row=2, sticky=tk.W)
-        self.yes_choice.grid(column=0, row=3, sticky=tk.EW)
-        self.no_choice.grid(column=0, row=4, sticky=tk.EW)
+        self.stack_select.grid(column=0, row=3, sticky=tk.EW)
         # Place Frame
-        self.grid(column=col, row=row, padx=5, pady=5, sticky=tk.EW)
+        self.grid(column=col, row=row, padx=20, pady=12, sticky=tk.EW)
 
 
 class ReturnsSelection(ttk.Frame):
@@ -371,74 +380,133 @@ class ReturnsSelection(ttk.Frame):
     """
 
     def __init__(self, container, col=1, row=1, rowspan=1):
-        super().__init__(container)
+        super().__init__(container, style='DarkFrame.TFrame')
+        self.controller = container.controller
 
-        self.container = container
-
-        self.frame_label = ttk.Label(self, text="Stocks", font=FONTS['h4'])
+        self.frame_label = ttk.Label(self, text="Stocks", font=FONTS['h4'], style='DarkFrame.TLabel')
         self.frame_label_help = ttk.Label(
-            self,
+            self, font=FONTS['p-help'], style='DarkFrame.TLabel', width=32,
             text="Stocks in selected market.\nDouble click to show returns",
-            font=FONTS['p-help'],
         )
         self.stocks_list = tk.Listbox(
             self,
-            listvariable=container.stocks,
+            listvariable=self.controller.stocks,
             height=15,
             selectmode=tk.BROWSE,
             exportselection=0,
             font=FONTS['p'],
         )
         # Binding double click left mouse
-        self.stocks_list.bind('<Double-Button-1>', container.show_returns)
+        self.stocks_list.bind('<Double-Button-1>', self.controller.show_returns)
+        # Colorize alternating lines of the listbox
+        for i in range(0, len(self.controller.stocks.get()), 2):
+            self.stocks_list.itemconfigure(i, background='#f0f0ff')
 
         # Place Widgets
         self.frame_label.grid(column=0, row=0, sticky=tk.W)
         self.frame_label_help.grid(column=0, row=1, sticky=tk.W)
         self.stocks_list.grid(column=0, row=2, sticky=tk.EW)
         # Place Frame.
-        self.grid(column=col, row=row, rowspan=rowspan, padx=5, pady=5, sticky=tk.W)
+        self.grid(column=col, row=row, rowspan=rowspan, padx=20, pady=5, sticky=tk.W)
 
     @property
     def selected_market(self):
-        if len(self.container.marketselection.markets) > 0:
-            return self.container.marketselection.markets[0]
+        if len(self.controller.marketselection.markets) > 0:
+            return self.controller.marketselection.markets[0]
         else:
             return None
 
+    @property
+    def selected_stock(self):
+        return self.stocks_list.curselection()[0]
 
-class StatusFrame(ttk.Frame):
-    """
-    Show status of the app:
-    - number of stocks selected
-    - std of the market
-    - counted/not counted fht
-    """
 
-    def __init__(self, container, col, row, columnspan=1):
-        super().__init__(container)
-
-        self.container = container
-
+class SettingsWindow(tk.Toplevel):
+    def __init__(self, controller):
+        super(SettingsWindow, self).__init__(controller)
+        self.controller = controller
+        self.configure(background='#FFFFFF')
+        self.title("Settings")
+        self.geometry("500x1000")
+        self.resizable(False, False)
+        # Configure the grid
+        self.grid_columnconfigure(0, weight=1)
+        for i in range(8):
+            self.grid_rowconfigure(i, weight=1)
         # Labels
-        self.l_number = ttk.Label(textvariable=self.container.done_counting)
+        self.label_title = ttk.Label(self, font=self.controller.style.h2,
+                                     text="Settings"
+                                     )
+        self.label = ttk.Label(self, font=self.controller.style.p,
+                               text="Manage basic settings to count FHT"
+                               )
+        self.label_title.grid(column=0, row=0)
+        self.label.grid(column=0, row=1)
+        ttk.Separator(self, orient=tk.HORIZONTAL).grid(column=0, row=2, pady=4, sticky=tk.EW)
+        # WIDGETS
+        self.criterioniputs = CriterionDropdownFrame(self, col=0, row=3)
+        self.thresholdsinputs = ThresholdFrame(self, col=0, row=4)
+        self.nbinsinput = NbinsFrame(self, col=0, row=5)
+        self.stackinput = StackChoiceFrame(self, col=0, row=6)
+        # Add button to close and save
+        self.btn_save = ttk.Button(self, text="Save", command=self.destroy)
+        self.btn_save.grid(column=0, row=7, padx=20, pady=(20, 25), ipadx=10, ipady=10)
 
-        # Place labels
-        self.l_number.grid(column=0, row=0, pady=5, padx=2)
 
-        # Place frame
-        self.grid(column=col, row=row, columnspan=columnspan, padx=20, pady=10, sticky=tk.NSEW)
+class MenuBar(tk.Menu):
+    def __init__(self, controller):
+        super(MenuBar, self).__init__(controller)
+
+        self.controller = controller
+        self.file_menu = tk.Menu(self, tearoff=0)
+        self.help_menu = tk.Menu(self, tearoff=0)
+        # File Menu options
+        self.file_menu.add_command(label="Reset")
+        self.file_menu.add_command(label="Open")
+        self.file_menu.add_command(label="Settings", command=self.controller.open_settings)
+        self.file_menu.add_separator()
+        self.file_menu.add_command(label="Exit", command=self.controller.destroy)
+        # Add the File Menu to the Menubar
+        self.add_cascade(
+            label="File",
+            menu=self.file_menu,
+            underline=0,
+        )
+        # Help Menu options
+        self.help_menu.add_command(label="About")
+        self.help_menu.add_command(label="Help")
+        # Add the File Menu to the Menubar
+        self.add_cascade(
+            label="Help",
+            menu=self.help_menu
+        )
 
 
-class StabilvolFrame(ttk.Frame):
-    def __init__(self, container):
-        super().__init__(container)
+class LeftBar(ttk.Frame):
+    def __init__(self, controller):
+        super(LeftBar, self).__init__(controller, style='DarkFrame.TFrame')
+        self.controller = controller
+
+        # Widgets
+        self.marketselection = MarketSelectionFrame(self, col=0, row=0)
+        self.returnselection = ReturnsSelection(self, col=0, row=2)
+        # Buttons
+        # Select market
+        self.btn_select = ttk.Button(self, text='Open returns file')
+        # Show selected stocks
+        self.btn_show = ttk.Button(self, text='Show selected stocks in Market', command=self.controller.select_stocks)
+        self.btn_show.grid(column=0, row=1, sticky=tk.EW, padx=20, pady=5)
+
+        self.grid(column=0, row=0, rowspan=4, ipadx=20, ipady=20, sticky=tk.NSEW)
+
+
+class StabilvolFrame(ttk.LabelFrame):
+    def __init__(self, controller):
+        super().__init__(controller, text='FHT Counting', style='H1.TLabelframe')
 
         self.stabilvols_binned = []
-        self.container = container
-        self.done_counting = tk.BooleanVar(self, value=False)
+        self.controller = controller
         # Variables
-        self.available_markets = tk.Variable(self, value=MARKETS, name='markets')
         self.start_date = tk.StringVar(self, value='2002', name='start_date')
         self.end_date = tk.StringVar(self, value='2014-01-01', name='end_date')
         self.window_length = tk.StringVar(self, value="6", name='duration')
@@ -454,7 +522,6 @@ class StabilvolFrame(ttk.Frame):
 
         # Objects
         self.accountant = DataExtractor()
-        self.stocks = tk.Variable(value=[])
         self.datas = []
         self.analyst = StabilVolter()
         self.stabilvols = []
@@ -463,238 +530,83 @@ class StabilvolFrame(ttk.Frame):
         # Fields options
         options = {'padx': 5, 'pady': 5}
 
-        # Label
-        self.label = ttk.Label(self, text='First Hitting Times Counting', font=FONTS['h3'])
-        self.label.grid(column=2, row=0, columnspan=2, sticky=tk.NW, **options)
-
         # Widgets
-        # Col 1
-        self.marketselection = MarketSelectionFrame(self, col=0, row=0, rowspan=2)
-        self.returnselection = ReturnsSelection(self, col=0, row=2, rowspan=7)
-        ttk.Separator(self, orient=tk.VERTICAL).grid(column=1, row=0, rowspan=8, sticky=tk.NS, padx=40)
         # Col 2
         self.startinput = StartTextFrame(self, col=2, row=1)
         self.windowsinputs = WindowsTextFrame(self, col=2, row=2)
-        self.criterioniputs = CriterionDropdownFrame(self, col=2, row=3)
-        # Col 3
-        self.thresholdsinputs = ThresholdFrame(self, col=3, row=1)
-        self.nbinsinput = NbinsFrame(self, col=3, row=2)
-        self.stackinput = StackChoiceFrame(self, col=3, row=3)
-
-        # Buttons
-        # Show selected stocks
-        self.btn_select = ttk.Button(self, text='Show selected stocks', width=10, command=self.select_stocks)
-        self.btn_select.grid(column=2, row=4, columnspan=2, sticky=tk.EW, padx=5, pady=5)
-        # Count FHT
-        self.btn_count = ttk.Button(self, text='Count!', width=10, command=self.start_counting)
-        self.btn_count.grid(column=2, row=5, columnspan=2, sticky=tk.EW, padx=5, pady=5)
-        # Show FHT
-        self.btn_fht = ttk.Button(self, text='Show FHT', width=10, command=self.show_fht, state=tk.DISABLED)
-        self.btn_fht.grid(column=2, row=6, columnspan=2, sticky=tk.EW, padx=5, pady=5)
-        # Show MFHT
-        self.btn_mfht = ttk.Button(self, text='Show MFHT', width=10, command=self.show_mfht, state=tk.DISABLED)
-        self.btn_mfht.grid(column=2, row=7, columnspan=2, sticky=tk.EW, padx=5, pady=5)
-        # Save series
-        self.btn_save = ttk.Button(self, text='Save series to csv', width=10, command=self.save_series,
-                                   state=tk.DISABLED)
-        self.btn_save.grid(column=2, row=8, columnspan=2, sticky=tk.EW, padx=5, pady=5)
-
-        # Inputs frame
-        self.inputs_frame = ttk.LabelFrame(self, text="Inputs", width=600)
-        self.inputs_label = ttk.Label(self.inputs_frame, text="Inputs will be displayed here")
-        self.inputs_frame.grid(column=0, row=9, columnspan=4, sticky=tk.NSEW, **options)
-        self.inputs_label.grid(row=0, column=0, columnspan=2)
-
-        # Infobar frame
-        self.status = StatusFrame(self, col=0, row=10, columnspan=4)
 
         # add padding to the frame and show it
-        self.grid(column=0, row=1, padx=20, pady=10, sticky=tk.NSEW)
+        self.grid(column=1, row=1, padx=10, pady=10, ipadx=5, ipady=10, sticky=tk.NSEW)
 
-    @property
-    def inputs(self):
-        inputs_dict = {
-            "markets": self.marketselection.markets,
-            "start_date": self.start_date.get().split(', '),
-            "duration": self.window_length.get().split(', '),
-            "criterion": self.criterion.get().lower(),
-            "criterion_value": self.criterion_value.get(),
-            "start_level": self.start_level.get(),
-            "end_level": self.end_level.get(),
-            "tau_min": self.tau_min.get(),
-            "tau_max": self.tau_max.get(),
-            "nbins": self.nbins.get(),
-            "stack": self.stack.get(),
-            "save": self.save.get(),
-        }
-        return inputs_dict
 
-    @property
-    def input_iterator(self):
-        inputs_to_iterate = [
-            self.inputs["markets"],
-            self.inputs["start_date"],
-            self.inputs["duration"]
-        ]
-        return itertools.product(*inputs_to_iterate)
+class ResultsFrame(ttk.LabelFrame):
+    """
+    Show results of the counting.
+    - Logger ID of the run
+    - Max value of MFHT
+    - 1st and 2nd baricenter of MFHT
+    """
+    def __init__(self, controller):
+        super(ResultsFrame, self).__init__(controller, text='Count Results', style='H1.TLabelframe')
 
-    @property
-    def multiple_markets(self):
-        return len(self.inputs['markets']) > 1
+        self.labels = ttk.Label(self, text="Results will be displayed here.")
+        self.label_log = ttk.Label(self, text="Log ID: ")
 
-    @property
-    def multiple_starts(self):
-        return len(self.inputs['start_date']) > 1
+        # Place Labels
+        self.labels.grid(column=0, row=0)
+        self.label_log.grid(column=0, row=1)
+        # Place Frame
+        self.grid(column=1, row=2, padx=10, pady=5, sticky=tk.NSEW)
 
-    @property
-    def multiple_durations(self):
-        return len(self.inputs['duration']) > 1
 
-    def select_stocks(self, event=None, show=True):
-        # Initialize datas
-        self.datas = []
-        stocks = []
-        # With new selection there is no FHT or MFHT to show,
-        # so disable showing buttons
-        self.btn_fht['state'] = tk.DISABLED
-        self.btn_mfht['state'] = tk.DISABLED
-        self.btn_save['state'] = tk.DISABLED
-        if len(self.inputs['markets']) <= 0:
-            messagebox.showerror(title="No market selected!", message="Select at least one market.")
-        else:
-            # Initialize DataExtractor
-            self.accountant._criterion = self.inputs['criterion']
-            self.accountant._value = self.inputs['criterion_value']
-            for market, start_date, duration in self.input_iterator:
-                print(f'{market} - {start_date} - {duration}')
-                # Check if starting date and duration are set up correctly
-                start_date, end_date, duration = self.accountant.check_dates(
-                    start_date, None, duration
-                )
-                # Update DataExtractor time window
-                self.accountant.start_date = start_date
-                self.accountant.end_date = end_date
-                self.accountant.duration = duration
-                # Extract data
-                data = self.accountant.extract_data(self.container.root / f'data/interim/{market}.pickle')
-                stocks.extend(list(data.columns))  # Add market stocks to list
-                self.stocks.set(stocks)  # Set stocks variable for the returnselection Listbox
-                self.datas.append(data)
-                if show:
-                    self.accountant.plot_selection(edit=True).set_title(f"{market} selected stocks")
-                    plt.show()
-        return None
+class ButtonFrame(ttk.Frame):
+    def __init__(self, controller):
+        super(ButtonFrame, self).__init__(controller)
 
-    def show_returns(self, event):
-        stock_selection = int(self.returnselection.stocks_list.curselection()[0])
-        ticker = self.accountant.data.columns[stock_selection]
-        self.accountant.plot_returns(ticker=ticker)
-        return None
+        self.btn_count = ttk.Button(self, text="COUNT", width=15, command=controller.count_fht)
+        self.btn_plot_fht = ttk.Button(self, text="PLOT FHT", width=15, command=controller.plot_fht)
+        self.btn_plot_mfht = ttk.Button(self, text="PLOT MFHT", width=15, command=controller.plot_mfht)
+        self.btn_save = ttk.Button(self, text="SAVE", width=15, )
+        # self.btn_show = ttk.Button(self, text="VISUALIZE", width=15, )
+        # Place Widgets
+        self.btn_count.grid(row=0, column=0, padx=8, ipadx=5, ipady=10, sticky=tk.E)
+        self.btn_plot_fht.grid(row=0, column=1, padx=8, ipadx=5, ipady=10, sticky=tk.E)
+        self.btn_plot_mfht.grid(row=0, column=2, padx=8, ipadx=5, ipady=10, sticky=tk.E)
+        self.btn_save.grid(row=0, column=3, padx=8, ipadx=5, ipady=10, sticky=tk.E)
+        # self.btn_show.grid(row=0, column=4, padx=8, ipadx=5, ipady=10, sticky=tk.E)
+        # Place Frame
+        self.grid(column=1, row=3, padx=10, pady=20, sticky=tk.E)
 
-    def updates_input_label(self):
-        for row, input in enumerate(self.inputs.keys()):
-            value = self.inputs.get(input)
-            input_label = ttk.Label(self.inputs_frame, text=input, font='Arial 10 bold', width=10, anchor='w')
-            input_label.grid(row=row, column=0)
-            value_label = ttk.Label(self.inputs_frame, text=value, font=('Lucida Console', 10), width=10, anchor='e')
-            value_label.grid(row=row, column=1)
-        self.done_counting.set(True)
-        return None
 
-    def start_counting(self):
-        """
-        Count FHT and make data available in list self.stabilvols.
-        """
-        self.stabilvols = []
-        self.stabilvols_binned = []
-        self.updates_input_label()
-        self.analyst.start_level = self.inputs['start_level']
-        self.analyst.end_level = self.inputs['end_level']
-        self.analyst.tau_min = self.inputs['tau_min']
-        self.analyst.tau_max = self.inputs['tau_max']
-        if len(self.inputs['markets']) <= 0:
-            messagebox.showerror(title="No market selected!", message="Select at least one market.")
-        else:
-            if len(self.datas) == 0:
-                # Datas are not extracted yet,
-                # extract but don't show result
-                self.select_stocks(show=False)
-            for i, inputs in enumerate(self.input_iterator):
-                market = inputs[0]
-                start = inputs[1]
-                duration = inputs[2]
-                stabilvol = self.analyst.get_stabilvol(self.datas[i])
-                stabilvol['Market'] = market
-                stabilvol['Start date'] = start
-                stabilvol['Window length'] = duration
-                self.stabilvols.append(stabilvol)
-            # Enable buttons to show/save results
-            self.btn_fht['state'] = tk.NORMAL
-            self.btn_mfht['state'] = tk.NORMAL
-            # Trah extracted data
-            self.datas = []
-            print("Countitng finished. You can visualize results now.")
-        return None
+class StatusFrame(ttk.Frame):
+    """
+    Show status of the app:
+    - number of stocks selected
+    - std of the market
+    - counted/not counted fht
+    """
 
-    def show_fht(self, stack=False):
-        for i, inputs in enumerate(self.input_iterator):
-            market = inputs[0]
-            start_date = inputs[1]
-            duration = inputs[2]
-            fht = self.stabilvols[i]
-            self.analyst.plot_fht(fht, title=f"{market} FHT from {start_date} for {duration} years")
-        return None
+    def __init__(self, controller):
+        super().__init__(controller, relief=tk.RIDGE)
+        self.controller = controller
+        self.controller.done_counting.trace_add('write', self.update_count)
 
-    def show_mfht(self, stack=False):
-        for i, inputs in enumerate(self.input_iterator):
-            market = inputs[0]
-            start = inputs[1]
-            duration = inputs[2]
-            stabilvol = self.stabilvols[i]
-            stabilvol_binned = self.analyst.get_average_stabilvol(stabilvol, nbins=self.inputs['nbins'])
-            stabilvol_binned['Market'] = market
-            stabilvol_binned['Start date'] = start
-            stabilvol_binned['Window length'] = duration
-            self.stabilvols_binned.append(stabilvol_binned)
-            if not self.inputs['stack']:
-                # Create plot and show it
-                ax = self.analyst.plot_mfht(
-                    stabilvol_binned,
-                    title=f"{market} MFHT from {start} for {duration} years",
-                    edit=True,
-                )
-                plt.show()
-        if self.inputs['stack']:
-            plot_title = f"Markets: {self.inputs['markets']} / " \
-                         f"Start dates: {self.inputs['start_date']} / " \
-                         f"Duration: {self.inputs['duration']}"
-            ax = self.analyst.plot_mfht(
-                *self.stabilvols_binned,
-                # title=plot_title,
-                edit=True,
-            )
-            plt.show()
-        # Enable button to save serie
-        self.btn_save['state'] = tk.NORMAL
-        return None
+        self.label_market = ttk.Label(self, text='Selected Market: - ', )
+        self.label_stocks = ttk.Label(self, text='Stock included in period: - ', )
+        self.label_count = ttk.Label(self, text=f'FHT: Not counted', )
+        # Place Widgets
+        self.label_market.grid(column=0, row=0, padx=15, pady=(10, 0), sticky=tk.W)
+        self.label_stocks.grid(column=1, row=0, padx=15, pady=(10, 0), sticky=tk.W)
+        self.label_count.grid(column=2, row=0, padx=15, pady=(10, 0), sticky=tk.E)
+        # Place Frame
+        self.grid(column=0, row=4, columnspan=2, ipadx=5, ipady=5, sticky=tk.NSEW)
+        # Create grid
+        for c in range(5):
+            self.columnconfigure(c, weight=1)
 
-    def save_series(self):
-        for i, inputs in enumerate(self.input_iterator):
-            market = inputs[0]
-            start_date = inputs[1]
-            duration = inputs[2]
-            start = str(self.inputs["start_level"]).replace('.', 'p').replace('-', 'n')
-            end = str(self.inputs["end_level"]).replace('.', 'p').replace('-', 'n')
-            nbins = self.inputs["nbins"]
-            fht_filename = f"{market}_{start_date}_{duration}_{start}_{end}"
-            mfht_filename = f"{market}_{start_date}_{duration}_{start}_{end}_{nbins}b"
-            try:
-                self.analyst.save_fht(self.stabilvols[i], filename=fht_filename)
-                self.analyst.save_mfht(self.stabilvols_binned[i], filename=mfht_filename)
-            except FileNotFoundError as e:
-                logging.warning(f"Error saving the file: {e}")
-            else:
-                logging.info("File saved succesfully in data/preprocessed folder")
+    def update_count(self, *args):
+        count_status = 'Counted' if self.controller.done_counting.get() else 'Not counted'
+        self.label_count['text'] = f'FHT: {count_status}'
         return None
 
 
@@ -703,23 +615,49 @@ class App(tk.Tk):
         super().__init__()
         self.root = ROOT
 
+        self.done_counting = tk.BooleanVar(self, value=False)
+
         # Style
+        self.configure(background='#FFFFFF')
         style = ttk.Style(self)
         style.theme_use("xpnative")
+        style.configure('TFrame', background='#FFFFFF')
+        style.configure('TLabelframe', background='#FFFFFF')
+        style.configure('H1.TLabelframe.Label', font='Helvetica 16', background='#FFFFFF')
+        style.configure('TLabel', background='#FFFFFF')
+        style.configure('TEntry', background='#FFFFFF')
+        style.configure('TRadiobutton', background='#FFFFFF')
+        style.configure('DarkFrame.TFrame', background='#EDEDED', highlightbackground='#888888',
+                        highlightcolor='#888888', highlightthickness=2, borderwidth=2)
+        style.configure('DarkFrame.TLabel', background='#EDEDED')
 
         self.title("StabilVol")
-        self.geometry('800x800')
+        self.geometry('1080x700')
         self.resizable(True, True)
+        self.minsize(930, 630)
 
         self.label = ttk.Label(
             self,
             text="Stabilizing Effects of Volatility in Financial Markets",
             font=FONTS['h2']
         )
-        self.label.grid(column=0, row=0, sticky=tk.EW, pady=15, padx=5)
+        self.label.grid(column=1, row=0, sticky=tk.W, pady=15, padx=5)
+
+        # Configure the grid
+        self.columnconfigure(0, weight=1)
+        self.columnconfigure(1, weight=4)
+        self.rowconfigure(0, weight=2)
+        self.rowconfigure(1, weight=5)
+        self.rowconfigure(2, weight=2)
+        self.rowconfigure(2, weight=1)
 
 
 if __name__ == "__main__":
     app = App()
+    menubar = MenuBar(app)
+    app.config(menu=menubar)
+    marketframe = LeftBar(app)
     interface = StabilvolFrame(app)
+    buttons = ButtonFrame(app)
+    statusbar = StatusFrame(app)
     app.mainloop()
