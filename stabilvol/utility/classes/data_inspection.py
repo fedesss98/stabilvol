@@ -55,10 +55,15 @@ class Window:
             if value < 0 or value > 1:
                 raise ValueError("Percentage must be between 1 and 0")
         elif method == 'startend':
-            if not isinstance(value, (str, float, int)):
-                raise ValueError("StartEnd threshold has incorrect format")
-            else:
+            try:
+                float(value)
+                # Then the string contains only numbers
+                value = str(value) + 'd'
+            except ValueError:
+                # Then the string contains a letter
                 value = str(value)
+            else:
+                raise ValueError("StartEnd threshold has incorrect format")
         return value
 
     def count_series(self, df, return_stocks=False, **method):
@@ -71,7 +76,7 @@ class Window:
         elif 'startend' in method:
             value = self.check_method_value(method.get('startend'), 'startend')
             selected_stocks = self.startend_selection(
-                series, self.left, self.right, value
+                series, self.left, self.right, pd.Timedelta(value)
             )
         else:
             raise ValueError(f"Criterion '{method.keys()}' not known")
