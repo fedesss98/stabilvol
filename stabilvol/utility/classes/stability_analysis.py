@@ -109,7 +109,7 @@ class StabilVolter:
         return input_dict
 
     def count_stock_fht(
-            self, series, threshold_start=None, threshold_end=None, divergence_limit=None
+            self, series, squeeze=False, threshold_start=None, threshold_end=None, divergence_limit=None
     ):
         """
         Count First Hitting Times of one stock returns series.
@@ -151,6 +151,8 @@ class StabilVolter:
                     volatility.append(local_volatility)
         # Gather data in a DataFrame
         stock_stabilvol = np.array([volatility, fht])
+        if squeeze:
+            stock_stabilvol = stock_stabilvol.flatten()
         return stock_stabilvol
 
     def get_stabilvol(self, data=None, method='pandas', **frame_info) -> pd.DataFrame:
@@ -165,7 +167,9 @@ class StabilVolter:
         logging.info("Starting FHT counting.")
         self.data = data if data is not None else self.data
         if method == 'pandas':
-            data.apply(self.count_stock_fht)
+            result = self.data.apply(self.count_stock_fht, squeeze=True)
+            result_matrix = [series.reshape(2, -1) for series in result]
+            self.stabilvol = pd.DataFrame(np.concatenate(result_matrix, axis=1).T, columns=['Volatility', 'FHT'])
         elif method == 'multi':
             # Multiprocessing method (faster)
             pool = mp.Pool(processes=mp.cpu_count()-1)
@@ -205,20 +209,33 @@ class StabilVolter:
         ax.set_xlabel('Days', fontsize=24)
         return ax
 
-    def plot_fht(self, data_to_plot=None, title=None):
+    def plot_fht(self, data_to_plot=None, use_ax=None, title=None, plot_indicators=True):
         data_to_plot = data_to_plot if data_to_plot is not None else self.stabilvol
-        fig, ax = plt.subplots(figsize=(10, 6))
-        suptitle = "First Hitting Times" if title is None else title
-        fig.suptitle(suptitle, fontsize=20)
-        ax.set_title(f"Thresholds: [ {self.threshold_start:.4} / {self.threshold_end:.4} ]",
-                     fontsize=16)
+        ax_title = f"Thresholds: [ {self.threshold_start:.4} / {self.threshold_end:.4} ]"
+        if use_ax is not None:
+            ax = use_ax
+            ax.set_title(title if title is not None else ax_title, fontsize=16)
+        else:
+            # Create a new figure
+            fig, ax = plt.subplots(figsize=(10, 6))
+            suptitle = "First Hitting Times" if title is None else title
+            fig.suptitle(suptitle, fontsize=20)
+            ax.set_title(ax_title, fontsize=16)
         sns.scatterplot(data_to_plot,
                         x='Volatility',
-                        y='FHT')
-        ax.set_xlim(0, 0.1)
+                        y='FHT',
+                        ax=ax)
+        if plot_indicators:
+            indicators = self.get_indicators(data_to_plot)
+            ax.axhline(y=indicators['Max'], ls='--', c='r')
+            ax.axvline(x=indicators['Peak'], ls='--', c='r')
+            ax.axvspan(indicators['HM Range'][0], indicators['HM Range'][1], color='blue', alpha=0.2)
         ax.grid()
         plt.tight_layout()
-        plt.show()
+        if use_ax is not None:
+            return ax
+        else:
+            plt.show()
         return None
 
     def plot_mfht(self, *data_to_plot, title=None, x_range=None, edit=False, ):
@@ -259,6 +276,21 @@ class StabilVolter:
             plt.show()
         return ax
 
+    @staticmethod
+    def get_indicators(stabilvol: pd.DataFrame):
+        stabilvol = stabilvol.set_index('Volatility').sort_index()
+        max_value = stabilvol['FHT'].max()
+        peak_position = stabilvol['FHT'].idxmax()
+        half_max_values = stabilvol.loc[stabilvol['FHT'] >= max_value/2]
+        fwhm = half_max_values.index[-1] - half_max_values.index[0]
+        indicators = {
+            'Max': max_value,
+            'Peak': peak_position,
+            'FWHM': fwhm,
+            'HM Range': (half_max_values.index[0], half_max_values.index[-1]),
+        }
+        return indicators
+
     def save_fht(self, data_to_save=None, market=None, filename=None, format='pickle', *args):
         data_to_save = self.stabilvol if data_to_save is None else data_to_save
         if not market and not filename:
@@ -293,11 +325,178 @@ class StabilVolter:
         return None
 
 
+class MeanFirstHittingTimes:
+    def __init__(self, data, nbins=10001, max_volatility=0.5, **metadata):
+        logging.info("Mean First Hitting times initialized")
+        self.mfht = pd.Series(dtype=float)
+        self.nbins = nbins
+        self.max_volatility = max_volatility
+        self.raw_stabilvol = data
+        self.make_average_stabilvol()
+
+    @property
+    def raw_stabilvol(self):
+        return self._raw_stabilvol
+
+    @raw_stabilvol.setter
+    def raw_stabilvol(self, stabilvol):
+        if isinstance(stabilvol, pd.DataFrame):
+            fht = stabilvol['FHT'].values
+            v = stabilvol['Volatility'].values
+        elif isinstance(stabilvol, pd.Series):
+            fht = stabilvol.values
+            v = stabilvol.index.values
+        elif isinstance(stabilvol, np.ndarray):
+            fht = stabilvol[:, 1]
+            v = stabilvol[:, 0]
+        else:
+            raise ValueError("Stabilvol data has incorrect format. "
+                             "Try again with a Pandas Series or DataFrame or Numpy Array")
+        self._raw_stabilvol = pd.Series(data=fht, index=v)
+        return pd.Series(data=fht, index=v)
+
+    @property
+    def data(self):
+        return self.mfht
+
+    @property
+    def bins(self):
+        return np.linspace(0, .5, num=self.nbins)
+
+    @property
+    def max_value(self):
+        return self.mfht.max()
+
+    @property
+    def peak_position(self):
+        return self.mfht.idxmax()
+
+    @property
+    def fwhm(self):
+        half_max_values = self.mfht.loc[self.mfht >= self.max_value/2]
+        return half_max_values.index[-1] - half_max_values.index[0]
+
+    @property
+    def indicators(self):
+        baricenters = self.baricenters
+        # Baricenters widths
+        first_baricenter = baricenters[0].index[-1] - baricenters[0].index[0]
+        second_baricenter = baricenters[1].index[-1] - baricenters[1].index[0]
+        third_baricenter = baricenters[2].index[-1] - baricenters[2].index[0]
+        # Indicators width
+        indicators = {
+            'Max': self.max_value,
+            'Peak': self.peak_position,
+            'FWHM': self.fwhm,
+            'First Baricenter': first_baricenter,
+            'Second Baricenter': second_baricenter,
+            'Third Baricenter': third_baricenter,
+        }
+        return indicators
+
+    @property
+    def values(self, mode='pandas'):
+        return self.mfht
+
+    @property
+    def baricenters(self):
+        """
+        Characterize points in the peak:
+        Those are high and near the peak.
+        :return:
+        """
+        baricenters = []
+        # Consider the series without peak point
+        mfht = self.mfht.drop(self.peak_position).dropna()
+        # peak_index = np.where(self.mfht == self.max_value)[0][0]
+        distances = np.array(abs(mfht.index - self.peak_position).values)
+        weights = mfht / distances
+        weights.sort_values(ascending=False, inplace=True)
+        total_weight = np.sum(weights)
+        for fraction in [0.5, 0.9, 0.95]:
+            min_weight = fraction * total_weight
+            accumulated_w = 0
+            i = 0
+            while accumulated_w <= min_weight:
+                # Sum the biggest weights
+                accumulated_w += weights.iloc[i]
+                i += 1
+            # Take the values of volatility until index
+            baricenter = weights.iloc[: i]
+            baricenters.append(mfht.loc[baricenter.index].sort_index())
+        return baricenters
+
+    @staticmethod
+    def filter_stabilvol(stabilvol, max_volatility):
+        """ Returns the stabilvol filtered by maximum volatility """
+        volatility = stabilvol.index
+        return stabilvol[volatility <= max_volatility]
+
+    @staticmethod
+    def find_outliers(series):
+        outliers = []
+        if len(series) > 1:
+            for i, fht in series['FHT'].items():
+                distance = abs(fht - series['FHT'].mean())
+                if distance > 6 * series['FHT'].std():
+                    outliers.append(i)
+        return outliers
+
+    @staticmethod
+    def classify_inliers(series, std_range=6):
+        fhts = series['FHT']
+        distance = abs(fhts - fhts.mean())
+        std = fhts.std() if len(fhts) > 1 else 0
+        return distance <= std * std_range
+
+    def plot_baricenter(self, baricenter):
+        fig, ax = plt.subplots()
+        self.mfht.reset_index().plot(ax=ax, x='Volatility', y='FHT', c='b', kind='scatter')
+        self.mfht.loc[baricenter.index].reset_index().plot(ax=ax, x='Volatility', y='FHT', c='r', kind='scatter')
+        plt.show()
+
+    def smooth_stabilvol(self, stabilvol, bins):
+        # Create a DataFrame from the Series with names FHT and Volatility
+        stabilvol = stabilvol.to_frame(name='FHT').sort_index().reset_index(names='Volatility')
+        stabilvol['ranges'] = pd.cut(stabilvol['Volatility'], bins=bins, include_lowest=True)
+        # Classify inliers that are inside 6 standard deviations
+        inliers = stabilvol.groupby('ranges').apply(self.classify_inliers, std_range=2)
+        stabilvol_smoothed = stabilvol.loc[inliers.values]
+        return stabilvol_smoothed
+
+    def make_average_stabilvol(self):
+        filtered = self.filter_stabilvol(self.raw_stabilvol, self.max_volatility)
+        smoothed = self.smooth_stabilvol(filtered, self.bins)
+        stabilvol_binned = smoothed.groupby('ranges').mean().set_index('Volatility')
+        self.mfht = stabilvol_binned.squeeze()
+
+    def plot(self, ax=None, edit=False):
+        if ax is None:
+            fig, ax = plt.subplots(figsize=(10, 6))
+            fig.suptitle('Mean First Hitting Times')
+        ax.set_title(f'{self.nbins} bins')
+        self.mfht.reset_index().plot(x='Volatility', y='FHT', kind='scatter', ax=ax)
+        ax.axhline(y=self.max_value, ls='--', c='r')
+        ax.axvline(x=self.peak_position, ls='--', c='r')
+        # Second baricenter area
+        baricenters = self.baricenters
+        ax.axvspan(baricenters[1].index[0], baricenters[1].index[-1], color='r', alpha=0.2)
+        ax.axvspan(baricenters[1].index[0], baricenters[1].index[-1], color='g', alpha=0.2)
+        ax.axvspan(baricenters[1].index[0], baricenters[1].index[-1], color='b', alpha=0.2)
+        ax.scatter(x=self.peak_position, y=self.max_value, c='r')
+        if not edit:
+            plt.show()
+            return None
+        else:
+            return ax
+
+
 if __name__ == "__main__":
     Y1 = np.array([1, -1, 0, 1, 0, -1, 1, -1, 0, -1])
     Y2 = np.array([1, 0, 0, 0, -1, -1, 1, 0, 0, -1])
-    Y3 = np.array([1, np.nan, np.nan, 0, 0, -1, 1, -1, 0, -1])
-    data = pd.DataFrame(np.vstack((Y1, Y2, Y3)).T, columns=['y1', 'y2', 'y3'])
+    Y3 = np.array([1, 0, 0, 0, -1, -1, 1, 0, 0, -1])
+    Y4 = np.array([1, np.nan, np.nan, 0, 0, -1, 1, -1, 0, -1])
+    data = pd.DataFrame(np.vstack((Y1, Y2, Y3, Y4)).T, columns=['y1', 'y2', 'y3', 'y4'])
     start_level = 0.5
     end_level = -0.5
     analyst = StabilVolter(start_level=start_level, end_level=end_level)
