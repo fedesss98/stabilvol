@@ -50,6 +50,7 @@ class StabilVolter:
         self.data_states: pd.DataFrame = None
         self.stabilvol: pd.DataFrame = None
         self.stabilvol_binned = None
+        self.pdf = None
 
         # Print info
         logging.info("StabilVolter created.")
@@ -133,6 +134,7 @@ class StabilVolter:
         counting = False
         fht = []
         volatility = []
+        start_t = 0
         # Ignore datetime indexes for iteration, use only integers
         for t, level in enumerate(series):
             if not counting and start_level <= level < divergence_limit:
@@ -196,6 +198,17 @@ class StabilVolter:
             self.stabilvol_binned[i] = str(stabilvol[i].unique())
         return stabilvol_binned
 
+    def get_pdf(self, stabilvol=None):
+        stabilvol = stabilvol if stabilvol is not None else self.stabilvol
+        info = [col for col in stabilvol.columns if col not in ['Volatility', 'FHT']]
+        fht = stabilvol['FHT']
+        bins = np.linspace(0, fht.max(), num=100)
+        pdf = fht.groupby(pd.cut(fht, bins=bins)).count()
+        self.pdf = pdf.to_frame(name='Count')
+        for i in info:
+            self.pdf[i] = str(stabilvol[i].unique()[0])
+        return self.pdf
+
     def _plot_states(self):
         fig, ax = plt.subplots(figsize=(14, 12))
         sns.heatmap(self.data_states.T,
@@ -209,9 +222,17 @@ class StabilVolter:
         ax.set_xlabel('Days', fontsize=24)
         return ax
 
+    def plot(self, data='fht', **kwargs):
+        if data == 'fht':
+            return self.plot_fht(**kwargs)
+        elif data == 'pdf':
+            return self.plot_pdf(**kwargs)
+        else:
+            raise ValueError("Unknown data type")
+
     def plot_fht(self, data_to_plot=None, use_ax=None, title=None, plot_indicators=True):
         data_to_plot = data_to_plot if data_to_plot is not None else self.stabilvol
-        ax_title = f"Thresholds: [ {self.threshold_start:.4} / {self.threshold_end:.4} ]"
+        ax_title = f"Thresholds: [ {self._start:.4} / {self._end:.4} ]"
         if use_ax is not None:
             ax = use_ax
             ax.set_title(title if title is not None else ax_title, fontsize=16)
@@ -231,6 +252,36 @@ class StabilVolter:
             ax.axvline(x=indicators['Peak'], ls='--', c='r')
             ax.axvspan(indicators['HM Range'][0], indicators['HM Range'][1], color='blue', alpha=0.2)
         ax.grid()
+        plt.tight_layout()
+        if use_ax is not None:
+            return ax
+        else:
+            plt.show()
+        return None
+
+    def plot_pdf(self, data_to_plot=None, use_ax=None, title=None):
+        data_to_plot = data_to_plot if data_to_plot is not None else self.pdf
+        data_to_plot['FHT'] = np.log(data_to_plot['FHT'].cat.categories.right)
+        # Remove rows where column 'Count' contains 0 values
+        data_to_plot = data_to_plot[data_to_plot['Count'] != 0]
+        data_to_plot['Count'] = np.log(data_to_plot['Count'])
+        ax_title = f"Thresholds: [ {self._start:.4} / {self._end:.4} ]"
+        if use_ax is not None:
+            ax = use_ax
+            ax.set_title(title if title is not None else ax_title, fontsize=16)
+        else:
+            # Create a new figure
+            fig, ax = plt.subplots(figsize=(10, 6))
+            suptitle = "PDF" if title is None else title
+            fig.suptitle(suptitle, fontsize=20)
+            ax.set_title(ax_title, fontsize=16)
+        sns.regplot(data_to_plot,
+                   x='FHT',
+                   y='Count',
+                   ax=ax)
+        ax.grid()
+        # ax.set_xscale('log')
+        # ax.set_yscale('log')
         plt.tight_layout()
         if use_ax is not None:
             return ax
@@ -353,7 +404,6 @@ class MeanFirstHittingTimes:
             raise ValueError("Stabilvol data has incorrect format. "
                              "Try again with a Pandas Series or DataFrame or Numpy Array")
         self._raw_stabilvol = pd.Series(data=fht, index=v)
-        return pd.Series(data=fht, index=v)
 
     @property
     def data(self):

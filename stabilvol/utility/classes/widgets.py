@@ -562,17 +562,19 @@ class ButtonFrame(ttk.Frame):
     def __init__(self, controller):
         super(ButtonFrame, self).__init__(controller)
 
-        self.btn_count = ttk.Button(self, text="COUNT", width=15, command=controller.count_fht)
-        self.btn_plot_fht = ttk.Button(self, text="PLOT FHT", width=15, command=controller.plot_fht)
-        self.btn_plot_mfht = ttk.Button(self, text="PLOT MFHT", width=15, command=controller.plot_mfht)
-        self.btn_save = ttk.Button(self, text="SAVE", width=15, )
+        self.btn_count = ttk.Button(self, text="COUNT", width=14, command=controller.start_counting_cycles)
+        self.btn_plot_fht = ttk.Button(self, text="PLOT FHT", width=14, command=controller.plot_fht)
+        self.btn_plot_pdf = ttk.Button(self, text="PLOT PDF", width=14, command=controller.plot_pdf)
+        self.btn_plot_mfht = ttk.Button(self, text="PLOT MFHT", width=14, command=controller.plot_mfht)
+        self.btn_save = ttk.Button(self, text="SAVE", width=12, command=controller.save_analysis)
         # self.btn_show = ttk.Button(self, text="VISUALIZE", width=15, )
         # Place Widgets
         self.btn_count.grid(row=0, column=0, padx=8, ipadx=5, ipady=10, sticky=tk.E)
         self.btn_plot_fht.grid(row=0, column=1, padx=8, ipadx=5, ipady=10, sticky=tk.E)
-        self.btn_plot_mfht.grid(row=0, column=2, padx=8, ipadx=5, ipady=10, sticky=tk.E)
-        self.btn_save.grid(row=0, column=3, padx=8, ipadx=5, ipady=10, sticky=tk.E)
-        # self.btn_show.grid(row=0, column=4, padx=8, ipadx=5, ipady=10, sticky=tk.E)
+        self.btn_plot_pdf.grid(row=0, column=2, padx=8, ipadx=5, ipady=10, sticky=tk.E)
+        self.btn_plot_mfht.grid(row=0, column=3, padx=8, ipadx=5, ipady=10, sticky=tk.E)
+        self.btn_save.grid(row=0, column=4, padx=8, ipadx=5, ipady=10, sticky=tk.E)
+        # self.btn_show.grid(row=02, column=4, padx=8, ipadx=5, ipady=10, sticky=tk.E)
         # Place Frame
         self.grid(column=1, row=3, padx=10, pady=20, sticky=tk.E)
 

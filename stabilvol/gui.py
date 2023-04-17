@@ -58,6 +58,7 @@ class App(tk.Tk):
         self.accountant = DataExtractor()
         self.analyst = StabilVolter()
         self.fhts = {}
+        self.pdfs = {}
         self.mfhts = {}
         self.log_index = {}
         self.accountant_index = {}
@@ -277,7 +278,10 @@ class App(tk.Tk):
                 f'{market} {start_date} FHT INDICATORS in {duration} years',
                 indicators
             )
-            self.fhts[(market, start_date, duration)] = stabilvol
+            # GET PDF
+            pdf: DataFrame = self.analyst.get_pdf(stabilvol)
+            self.pdfs[(market, start_date, duration)] = pdf
+            # GET MFHT
             # Set maximum volatility to cut the long mfht tail
             max_volatility = indicators['Peak'] + 4*indicators['FWHM']
             mfht = MeanFirstHittingTimes(stabilvol, nbins=inputs['nbins'], max_volatility=max_volatility)
@@ -369,8 +373,15 @@ class App(tk.Tk):
         else:
             self._plot_stacked(mfhts)
 
-                data_to_plot = fhts.loc[fhts['Window length'] == d]
-                data_to_plot.groupby(['Market', 'Start date']).apply(plot_data)
+    def plot_pdf(self):
+        # Various computed PDFs can be plotted all in separate figures
+        # or grouped by market, start date or duration in a grid view
+        pdfs = pd.concat(self.pdfs)
+        if self.inputs['stack'] == "Nothing":
+            # Group plots by duration and print FHTs across markets on rows and start dates on columns
+            self._plot_grid(pdfs, plot_type='pdf')
+        else:
+            self._plot_stacked(pdfs)
 
     def save_analysis(self):
         """ Extract FHT from calculated ones and save them to a pickle file """
