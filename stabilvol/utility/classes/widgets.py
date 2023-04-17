@@ -364,7 +364,6 @@ class StackChoiceFrame(ttk.Frame):
                                          state="readonly",
                                          values=stack_options,
                                          textvariable=self.controller.stack)
-        self.controller.stack.set(stack_options[0])
         # Place Widgets
         self.frame_label.grid(column=0, row=1, sticky=tk.W)
         self.frame_label_help.grid(column=0, row=2, sticky=tk.W)
@@ -608,6 +607,25 @@ class StatusFrame(ttk.Frame):
         count_status = 'Counted' if self.controller.done_counting.get() else 'Not counted'
         self.label_count['text'] = f'FHT: {count_status}'
         return None
+
+
+class LoadingWindow(tk.Toplevel):
+    def __init__(self, controller):
+        super().__init__(controller)
+        self.controller = controller
+        self.configure(background='#FFFFFF')
+        self.title("Counting FHT...")
+        self.geometry("650x450+600+600")
+        self.resizable(False, False)
+        self.label = ttk.Label(self, text="Loading...")
+        self.label.pack(padx=10, pady=10)
+        self.progressbar = ttk.Progressbar(self, orient=tk.HORIZONTAL, length=200, mode='indeterminate')
+        self.progressbar.pack(padx=10, pady=10)
+        self.progressbar.start(5)
+
+    def on_closing(self):
+        self.controller.stop_counting()
+        self.destroy()
 
 
 class App(tk.Tk):

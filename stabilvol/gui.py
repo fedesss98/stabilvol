@@ -1,28 +1,24 @@
 """
 Graphic User Interface
 """
-import itertools
-import logging
-import tkinter as tk
-from tkinter import ttk, messagebox, filedialog
+import threading
 from pathlib import Path
+from tkinter import filedialog
+
 import seaborn as sns
-import pandas as pd
-from matplotlib import pyplot as plt
+from pandas import DataFrame
 
 ROOT = Path(__file__).parent
 
 try:
     from stabilvol.utility.definitions import ROOT, MARKETS, MARKETS_STATS
     from stabilvol.utility.styles import StabilvolStyle
-    from stabilvol.utility.classes.widgets import MenuBar, StabilvolFrame, StatusFrame, LeftBar, ButtonFrame, \
-        SettingsWindow, ResultsFrame
+    from stabilvol.utility.classes.widgets import *
     from stabilvol.utility.classes.data_extraction import DataExtractor
     from stabilvol.utility.classes.stability_analysis import StabilVolter, MeanFirstHittingTimes
     from stabilvol.log.logger import Logger
 except ModuleNotFoundError as e:
-    from utility.classes.widgets import MenuBar, StabilvolFrame, StatusFrame, LeftBar, ButtonFrame, SettingsWindow, \
-        ResultsFrame
+    from utility.classes.widgets import *
     from utility.definitions import ROOT, MARKETS, MARKETS_STATS
     from utility.styles import StabilvolStyle
     from utility.classes.data_extraction import DataExtractor
@@ -64,6 +60,7 @@ class App(tk.Tk):
         self.fhts = {}
         self.mfhts = {}
         self.log_index = {}
+        self.accountant_index = {}
 
         # VARIABLES
         # Market selection
@@ -98,6 +95,8 @@ class App(tk.Tk):
         self.statusbar = StatusFrame(self)
         # The setting are closed by default
         self.settings = None
+        self.progress_window = None
+        self.stack.set("Nothing")
 
     @property
     def inputs(self):
@@ -179,21 +178,31 @@ class App(tk.Tk):
         self.accountant.plot_returns(ticker=ticker)
         return None
 
-    def init_logger(self, market):
+    def init_logger(self, **kwargs):
+        """
+        Initialize the logger and check if inputs have already been used.
+        While the analyst is always the same, accountant inputs changes.
+        Market name is provided as keyword argument.
+        """
         self.logger.update()
-        inputs_to_log = self.logger.gather_inputs(self.accountant, self.analyst, market=market)
+        inputs_to_log = self.logger.gather_inputs(self.analyst, self.accountant, **kwargs)
         duplicate_id = self.logger.lookup_logs(inputs_to_log)
         if duplicate_id is not None:
             logging.info(f"Inputs already used in file with ID {duplicate_id}")
             self.logger.id = duplicate_id
         self.results.label_log.configure(text=f"Log ID:\t{self.logger.id}")
+        return duplicate_id
 
-    def write_log_index(self, market, start, duration):
+    def write_log_indexes(self, market, start, duration):
         """ Create an index to relate a log ID with its distinctive inputs """
-        index = {
+        log_index = {
             (market, start, duration): self.logger.id,
         }
-        self.log_index.update(index)
+        accountant_index = {
+            self.logger.id: self.accountant.inputs
+        }
+        self.log_index.update(log_index)
+        self.accountant_index.update(accountant_index)
 
     @staticmethod
     def print_indicators_table(header, indicators):
@@ -211,13 +220,19 @@ class App(tk.Tk):
         logging.info(f"{'-' * table_width}")
 
     def _append_new_mfht(self, mfht, market, start_date, duration):
-        # Take time series values from mfht object and append meta info
-        mfht = mfht.data
+        """ Reformat MFHT as DataFrame and append meta info """
+        mfht = mfht.data.to_frame(name="FHT")
+        mfht.index.name = "Volatility"
         mfht["Market"] = market
         mfht["Start date"] = start_date
         mfht["Window length"] = int(duration)
         # Save computed mfht in the App
         self.mfhts[(market, start_date, duration)] = mfht
+
+    def start_counting_cycles(self):
+        self.progress_window = LoadingWindow(self)
+        print("Starting counting cycles")
+        threading.Thread(target=self.count_fht).start()
 
     def count_fht(self):
         """
@@ -236,20 +251,27 @@ class App(tk.Tk):
             self.accountant.duration = duration
             self.accountant.criterion = (inputs['criterion'], inputs['criterion_value'])
             # Create a new log ID or use that of equal inputs runs
-            self.init_logger(market)
+            self.init_logger(market=market)
             # Link this ID to its distinctive inputs
-            self.write_log_index(market, start_date, duration)
-            logging.info(f"Run ID: {self.logger.id}")
-            # !!! Set sigma_range
-            data = self.accountant.extract_data(self.root / f'data/interim/{market}.pickle')
-            self.datas.append(data)
-            analyst_info = {
-                'Market': market,
-                'Start date': start_date,
-                'Window length': int(duration)
-            }
-            # GET FHT
-            stabilvol = self.analyst.get_stabilvol(data, 'multi', **analyst_info)
+            self.write_log_indexes(market, start_date, duration)
+            try:
+                # Try to load counted FHT from file if this exists
+                stabilvol = pd.read_pickle(ROOT / f'data/processed/fht/fht_{self.logger.id}.pickle')
+                self.fhts[(market, start_date, duration)] = stabilvol
+            except FileNotFoundError:
+                # If no file exists, count FHT
+                logging.info(f"Run ID: {self.logger.id}")
+                # !!! Set sigma_range
+                data = self.accountant.extract_data(self.root / f'data/interim/{market}.pickle')
+                self.datas.append(data)
+                analyst_info = {
+                    'Market': market,
+                    'Start date': start_date,
+                    'Window length': int(duration)
+                }
+                # GET FHT
+                stabilvol = self.analyst.get_stabilvol(data, 'multi', **analyst_info)
+                self.fhts[(market, start_date, duration)] = stabilvol
             indicators = self.analyst.get_indicators(stabilvol)
             self.print_indicators_table(
                 f'{market} {start_date} FHT INDICATORS in {duration} years',
@@ -258,7 +280,6 @@ class App(tk.Tk):
             self.fhts[(market, start_date, duration)] = stabilvol
             # Set maximum volatility to cut the long mfht tail
             max_volatility = indicators['Peak'] + 4*indicators['FWHM']
-            # GET MFHT
             mfht = MeanFirstHittingTimes(stabilvol, nbins=inputs['nbins'], max_volatility=max_volatility)
             mfht_indicators = mfht.indicators
             self.print_indicators_table(
@@ -267,7 +288,66 @@ class App(tk.Tk):
             )
             self._append_new_mfht(mfht, market, start_date, duration)
         logging.info("Counting terminated.")
+        self.progress_window.destroy()
         return None
+
+    def _plot_grid(self, df, plot_type='fht'):
+        for d in self.inputs['duration']:
+            nrows = len(self.inputs['markets'])
+            ncols = len(self.inputs['start_date'])
+            fig, axs = plt.subplots(nrows=nrows,
+                                    ncols=ncols,
+                                    tight_layout=True, figsize=(6 * ncols, 6 * nrows))
+            fig.suptitle(f'{d}-years stability analysis', fontsize=20)
+
+            def plot_data(group, duration):
+                market = group.name[0]
+                start = group.name[1]
+                end = (pd.Timestamp('2002') + pd.DateOffset(years=int(duration))).year
+                row = self.inputs['markets'].index(market)
+                col = self.inputs['start_date'].index(start)
+                ax = axs[row] if len(self.inputs['markets']) > 1 else axs
+                ax = ax[col] if len(self.inputs['start_date']) > 1 else ax
+                self.analyst.plot(plot_type,
+                                  data_to_plot=group.reset_index(3), use_ax=ax, title=f'{market} {start}-{end}')
+                return None
+
+            data_to_plot = df.loc[(df['Window length'].astype(str) == d)]
+            data_to_plot.groupby(['Market', 'Start date'], group_keys=True).apply(plot_data, duration=d)
+            plt.show()
+
+    @staticmethod
+    def convert_col_name(name):
+        if name == 'Start date':
+            return 'start_date'
+        elif name == 'Window length':
+            return 'duration'
+        elif name == 'Market':
+            return 'markets'
+        else:
+            return name
+
+    def _plot_stacked(self, df):
+        varaibles = ['Market', 'Start date', 'Window length']
+        # Take only free variables (not stacked) and their relative input sizes
+        variables_len = {v: len(self.inputs[self.convert_col_name(v)]) for v in varaibles if v != self.inputs['stack']}
+        # The final plot shoul be "more horizontal" than vertical
+        variable_col = max(variables_len, key=variables_len.get)
+        variable_row = list(set(varaibles) - {variable_col, self.inputs['stack']})[0]
+        g = sns.relplot(data=df,
+                        x='Volatility',
+                        y='FHT',
+                        hue=self.inputs['stack'],
+                        col=variable_col,
+                        row=variable_row
+                        )
+        # Draws a grid in axes
+        if sum([len(self.inputs[self.convert_col_name(v)]) for v in varaibles]) == 3:
+            g.ax.grid()
+        else:
+            for ax in g.axes.flat:
+                ax.grid()
+        plt.show()
 
     def plot_fht(self):
         # Various computed FHTs can be plotted all in separate figures
@@ -275,74 +355,36 @@ class App(tk.Tk):
         fhts = pd.concat(self.fhts)
         if self.inputs['stack'] == "Nothing":
             # Group plots by duration and print FHTs across markets on rows and start dates on columns
-            for d in self.inputs['duration']:
-                nrows = len(self.inputs['markets'])
-                ncols = len(self.inputs['start_date'])
-                fig, axs = plt.subplots(nrows=nrows,
-                                        ncols=ncols,
-                                        tight_layout=True, figsize=(6*ncols, 6*nrows))
-                fig.suptitle(f'{d}-years stability analysis', fontsize=20)
-
-                def plot_data(group, duration):
-                    market = group.name[0]
-                    start = group.name[1]
-                    end = (pd.Timestamp('2002')+pd.DateOffset(years=int(duration))).year
-                    row = self.inputs['markets'].index(market)
-                    col = self.inputs['start_date'].index(start)
-                    ax = axs[row] if len(self.inputs['markets']) > 1 else axs
-                    ax = ax[col] if len(self.inputs['start_date']) > 1 else ax
-                    self.analyst.plot_fht(group, use_ax=ax,
-                                          title=f'{market} {start}-{end}')
-                    return None
-
-                data_to_plot = fhts.loc[fhts['Window length'] == int(d)]
-                data_to_plot.groupby(['Market', 'Start date'], group_keys=True).apply(plot_data, duration=d)
-                plt.show()
+            self._plot_grid(fhts)
         else:
-            free_variables = [c for c in ['Market', 'Start date', 'Window length'] if c != self.inputs['stack']]
-            g = sns.relplot(data=fhts,
-                            x='Volatility',
-                            y='FHT',
-                            hue=self.inputs['stack'],
-                            row=free_variables[0],
-                            col=free_variables[1],)
-            plt.show()
+            self._plot_stacked(fhts)
 
     def plot_mfht(self):
-        # Various computed FHTs can be plotted all in separate figures
-        # or grouped by market and start date in a grid view
-        fhts = pd.concat(self.fhts)
-        if self.inputs['stack']:
-            for d in self.inputs['duration']:
-                fig, axs = plt.subplots(nrows=len(self.inputs['markets']),
-                                        ncols=len(self.inputs['start_date']),
-                                        tight_layout=True)
-                fig.suptitle(f'{d}-years stability analysis')
-
-                def plot_data(group):
-                    market = group.name[0]
-                    start = group.name[1]
-                    row = self.inputs['markets'].index(market)
-                    col = self.inputs['start_date'].index(start)
-                    sns.scatterplot(group,
-                                    x='Volatility',
-                                    y='FHT',
-                                    ax=axs[row][col])
+        # Various computed MFHTs can be plotted all in separate figures
+        # or grouped by market, start date or duration in a grid view
+        mfhts = pd.concat(self.mfhts)
+        if self.inputs['stack'] == "Nothing":
+            # Group plots by duration and print FHTs across markets on rows and start dates on columns
+            self._plot_grid(mfhts)
+        else:
+            self._plot_stacked(mfhts)
 
                 data_to_plot = fhts.loc[fhts['Window length'] == d]
                 data_to_plot.groupby(['Market', 'Start date']).apply(plot_data)
 
     def save_analysis(self):
+        """ Extract FHT from calculated ones and save them to a pickle file """
         directory = filedialog.askdirectory(title="Please select a directory to save your files")
         if directory:
             # The user did not cancel the selection
             for market, start_date, duration in self.inputs_iterator:
                 id: int = self.log_index[(market, start_date, duration)]
-                self.logger.save_log(self.analyst, market=market, start_date=start_date, duration=duration)
-                fht: pd.DataFrame = self.fhts[(market, start_date, duration)]
-                mfht: pd.DataFrame = self.mfhts[(market, start_date, duration)]
+                accountant_inputs = self.accountant_index[id]
+                self.logger.id = id
+                self.logger.save_log(self.analyst, market=market, **accountant_inputs)
+                fht: DataFrame = self.fhts[(market, start_date, duration)]
                 fht.to_pickle(Path(directory) / f"fht_{id}.pickle")
-                mfht.to_pickle(Path(directory) / f"mfht_{id}.pickle")
+
 
 def main():
     app = App()
