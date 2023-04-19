@@ -126,6 +126,9 @@ class App(tk.Tk):
         ]
         return itertools.product(*inputs_to_iterate)
 
+    def current_selection(self, total_dict):
+        return {key: value for key, value in total_dict.items() if key in self.inputs_iterator}
+
     def describe_selected_market(self, event):
         # Show extended name of a market when selected from Listbox
         listbox = event.widget
@@ -331,20 +334,26 @@ class App(tk.Tk):
         else:
             return name
 
-    def _plot_stacked(self, df):
+    def _plot_stacked(self, df, plot_type='fht'):
         varaibles = ['Market', 'Start date', 'Window length']
         # Take only free variables (not stacked) and their relative input sizes
         variables_len = {v: len(self.inputs[self.convert_col_name(v)]) for v in varaibles if v != self.inputs['stack']}
         # The final plot shoul be "more horizontal" than vertical
         variable_col = max(variables_len, key=variables_len.get)
         variable_row = list(set(varaibles) - {variable_col, self.inputs['stack']})[0]
-        g = sns.relplot(data=df,
-                        x='Volatility',
-                        y='FHT',
-                        hue=self.inputs['stack'],
-                        col=variable_col,
-                        row=variable_row
-                        )
+        plot_params = {
+            'x': 'Volatility' if plot_type == 'fht' else 'FHT',
+            'y': 'FHT' if plot_type == 'fht' else 'Count',
+            'hue': self.inputs['stack'],
+            'col': variable_col,
+            'row': variable_row
+        }
+        if plot_type == 'fht':
+            g = sns.relplot(data=df, **plot_params)
+        elif plot_type == 'pdf':
+            # Pass to linearized data in log-log scale
+            df = self.analyst.lienarize_powerlaw(df.reset_index(3))
+            g = sns.lmplot(data=df, **plot_params)
         # Draws a grid in axes
         if sum([len(self.inputs[self.convert_col_name(v)]) for v in varaibles]) == 3:
             g.ax.grid()
@@ -353,35 +362,36 @@ class App(tk.Tk):
                 ax.grid()
         plt.show()
 
-    def plot_fht(self):
+    @staticmethod
+    def show_selection_error():
+        messagebox.showerror(
+            "Error", "No data for selected Market, Starting Date or Window Length.")
+
+    @staticmethod
+    def take_interval_right_end(df):
+        interval = df.index.get_level_values(3)
+        if isinstance(interval, pd.IntervalIndex):
+            right_end = interval.right
+        elif isinstance(interval, pd.CategoricalIndex):
+            right_end = interval.categories.right
+        else:
+            right_end = interval
+        df.index = df.index.set_levels(right_end, level=3)
+        return df
+
+    def plot_selected_data(self, data, data_type='fht'):
         # Various computed FHTs can be plotted all in separate figures
         # or grouped by market and start date in a grid view
-        fhts = pd.concat(self.fhts)
+        data_to_plot = None
+        try:
+            data_to_plot = pd.concat(self.current_selection(data))
+        except ValueError:
+            self.show_selection_error()
         if self.inputs['stack'] == "Nothing":
             # Group plots by duration and print FHTs across markets on rows and start dates on columns
-            self._plot_grid(fhts)
+            self._plot_grid(data_to_plot, plot_type=data_type)
         else:
-            self._plot_stacked(fhts)
-
-    def plot_mfht(self):
-        # Various computed MFHTs can be plotted all in separate figures
-        # or grouped by market, start date or duration in a grid view
-        mfhts = pd.concat(self.mfhts)
-        if self.inputs['stack'] == "Nothing":
-            # Group plots by duration and print FHTs across markets on rows and start dates on columns
-            self._plot_grid(mfhts)
-        else:
-            self._plot_stacked(mfhts)
-
-    def plot_pdf(self):
-        # Various computed PDFs can be plotted all in separate figures
-        # or grouped by market, start date or duration in a grid view
-        pdfs = pd.concat(self.pdfs)
-        if self.inputs['stack'] == "Nothing":
-            # Group plots by duration and print FHTs across markets on rows and start dates on columns
-            self._plot_grid(pdfs, plot_type='pdf')
-        else:
-            self._plot_stacked(pdfs)
+            self._plot_stacked(data_to_plot, plot_type=data_type)
 
     def save_analysis(self):
         """ Extract FHT from calculated ones and save them to a pickle file """

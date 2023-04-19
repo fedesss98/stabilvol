@@ -561,11 +561,11 @@ class ResultsFrame(ttk.LabelFrame):
 class ButtonFrame(ttk.Frame):
     def __init__(self, controller):
         super(ButtonFrame, self).__init__(controller)
-
+        self.controller = controller
         self.btn_count = ttk.Button(self, text="COUNT", width=14, command=controller.start_counting_cycles)
-        self.btn_plot_fht = ttk.Button(self, text="PLOT FHT", width=14, command=controller.plot_fht)
-        self.btn_plot_pdf = ttk.Button(self, text="PLOT PDF", width=14, command=controller.plot_pdf)
-        self.btn_plot_mfht = ttk.Button(self, text="PLOT MFHT", width=14, command=controller.plot_mfht)
+        self.btn_plot_fht = ttk.Button(self, text="PLOT FHT", width=14, command=self.plot_fht)
+        self.btn_plot_pdf = ttk.Button(self, text="PLOT PDF", width=14, command=self.plot_pdf)
+        self.btn_plot_mfht = ttk.Button(self, text="PLOT MFHT", width=14, command=self.plot_mfht)
         self.btn_save = ttk.Button(self, text="SAVE", width=12, command=controller.save_analysis)
         # self.btn_show = ttk.Button(self, text="VISUALIZE", width=15, )
         # Place Widgets
@@ -577,6 +577,15 @@ class ButtonFrame(ttk.Frame):
         # self.btn_show.grid(row=02, column=4, padx=8, ipadx=5, ipady=10, sticky=tk.E)
         # Place Frame
         self.grid(column=1, row=3, padx=10, pady=20, sticky=tk.E)
+
+    def plot_fht(self):
+        self.controller.plot_selected_data(self.controller.fhts)
+
+    def plot_pdf(self):
+        self.controller.plot_selected_data(self.controller.pdfs, data_type='pdf')
+
+    def plot_mfht(self):
+        self.controller.plot_selected_data(self.controller.mfhts)
 
 
 class StatusFrame(ttk.Frame):
@@ -628,6 +637,8 @@ class LoadingWindow(tk.Toplevel):
     def on_closing(self):
         self.controller.stop_counting()
         self.destroy()
+
+
 
 
 class App(tk.Tk):

@@ -204,6 +204,9 @@ class StabilVolter:
         fht = stabilvol['FHT']
         bins = np.linspace(0, fht.max(), num=100)
         pdf = fht.groupby(pd.cut(fht, bins=bins)).count()
+        # Index data with right-end value of bins
+        pdf.index = pdf.index.categories.right
+        pdf.index.name = 'FHT'
         self.pdf = pdf.to_frame(name='Count')
         for i in info:
             self.pdf[i] = str(stabilvol[i].unique()[0])
@@ -259,12 +262,20 @@ class StabilVolter:
             plt.show()
         return None
 
+    @staticmethod
+    def lienarize_powerlaw(df):
+        # Convert independent variable to log scale
+        df['FHT'] = np.log(df['FHT'])
+        # Remove rows where column 'Count' contains 0 values to avoid log(0) errors
+        df = df[df['Count'] != 0].copy()
+        # Convert dependent variable to log scale
+        df.loc[:, 'Count'] = np.log(df['Count'])
+        return df
+
     def plot_pdf(self, data_to_plot=None, use_ax=None, title=None):
         data_to_plot = data_to_plot if data_to_plot is not None else self.pdf
-        data_to_plot['FHT'] = np.log(data_to_plot['FHT'].cat.categories.right)
-        # Remove rows where column 'Count' contains 0 values
-        data_to_plot = data_to_plot[data_to_plot['Count'] != 0]
-        data_to_plot['Count'] = np.log(data_to_plot['Count'])
+        # Pass to log-log data to plot a linear regression
+        data_to_plot = self.lienarize_powerlaw(data_to_plot)
         ax_title = f"Thresholds: [ {self._start:.4} / {self._end:.4} ]"
         if use_ax is not None:
             ax = use_ax
@@ -276,9 +287,9 @@ class StabilVolter:
             fig.suptitle(suptitle, fontsize=20)
             ax.set_title(ax_title, fontsize=16)
         sns.regplot(data_to_plot,
-                   x='FHT',
-                   y='Count',
-                   ax=ax)
+                    x='FHT',
+                    y='Count',
+                    ax=ax)
         ax.grid()
         # ax.set_xscale('log')
         # ax.set_yscale('log')
@@ -378,12 +389,14 @@ class StabilVolter:
 
 class MeanFirstHittingTimes:
     def __init__(self, data, nbins=10001, max_volatility=0.5, **metadata):
-        logging.info("Mean First Hitting times initialized")
         self.mfht = pd.Series(dtype=float)
         self.nbins = nbins
         self.max_volatility = max_volatility
         self.raw_stabilvol = data
         self.make_average_stabilvol()
+
+        # Print info
+        logging.info("Mean First Hitting times initialized")
 
     @property
     def raw_stabilvol(self):
