@@ -87,9 +87,8 @@ class DataExtractor:
         if value is not None and not isinstance(value, (str, pd.Timestamp)):
             raise TypeError('Expected string or pd.Timestamp object')
         self._end_date = pd.Timestamp(value)
-        if self.duration is not None:
-            self.duration = self._end_date - self.start_date
-        return None
+        # Set new duration
+        self.duration = self._end_date - self.start_date
 
     @property
     def duration(self):
@@ -100,7 +99,7 @@ class DataExtractor:
         """
         Duration serves only to set the end date for filtering dates
         and in the Window creation.
-        :param value:
+        :param int|str|pd.Timedelta value: number of years between start and end date
         :return:
         """
         if value is None:
@@ -109,9 +108,13 @@ class DataExtractor:
             else:
                 self._duration = None
                 return None
-        elif not isinstance(value, (str, int)):
-            raise TypeError('Expected string or int for duration')
+        elif not isinstance(value, (str, int, pd.Timedelta)):
+            raise TypeError('Expected string, int o timedelta for duration')
         else:
+            # The value is of correct type
+            if isinstance(value, pd.Timedelta):
+                # Convert days to years
+                value = value.days / 365.2425
             self._duration = DateOffset(years=int(value))
         if self._start_date is not None and self._end_date is pd.NaT:
             self._end_date = self.start_date + self._duration
