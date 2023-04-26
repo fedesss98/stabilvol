@@ -22,8 +22,6 @@ except ModuleNotFoundError as e:
     from data_inspection import Window
     from utility.definitions import ROOT
 
-logging.basicConfig(format='%(levelname)s: %(asctime)s - %(message)s', level=logging.INFO)
-
 
 class DataExtractor:
     def __init__(
@@ -84,11 +82,16 @@ class DataExtractor:
 
     @end_date.setter
     def end_date(self, value):
-        if value is not None and not isinstance(value, (str, pd.Timestamp)):
-            raise TypeError('Expected string or pd.Timestamp object')
-        self._end_date = pd.Timestamp(value)
-        # Set new duration
-        self.duration = self._end_date - self.start_date
+        if value is not None:
+            if isinstance(value, (str, pd.Timestamp)):
+                self._end_date = pd.Timestamp(value)
+                # Set new duration
+                self.duration = self._end_date - self.start_date
+            else:
+                raise TypeError('Expected string or pd.Timestamp object')
+        else:
+            # value is none, set it from duration
+            self._end_date = self.start_date + self._duration
 
     @property
     def duration(self):
@@ -107,7 +110,6 @@ class DataExtractor:
                 self._duration = self._end_date - self.start_date
             else:
                 self._duration = None
-                return None
         elif not isinstance(value, (str, int, pd.Timedelta)):
             raise TypeError('Expected string, int o timedelta for duration')
         else:
@@ -269,6 +271,8 @@ class DataExtractor:
 
 
 if __name__ == "__main__":
+    logging.basicConfig(format='%(levelname)s: %(asctime)s - %(message)s', level=logging.INFO)
+
     market = 'UW'
     start = None
     end = None

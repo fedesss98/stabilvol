@@ -11,7 +11,6 @@ import seaborn as sns
 
 from pathlib import Path
 import logging
-logging.basicConfig(format='%(levelname)s: %(asctime)s - %(message)s', level=logging.INFO)
 
 
 class StabilVolter:
@@ -555,6 +554,8 @@ class MeanFirstHittingTimes:
 
 
 if __name__ == "__main__":
+    logging.basicConfig(format='%(levelname)s: %(asctime)s - %(message)s', level=logging.INFO)
+
     Y1 = np.array([1, -1, 0, 1, 0, -1, 1, -1, 0, -1])
     Y2 = np.array([1, 0, 0, 0, -1, -1, 1, 0, 0, -1])
     Y3 = np.array([1, 0, 0, 0, -1, -1, 1, 0, 0, -1])
