@@ -12,6 +12,7 @@ from utility.classes.stability_analysis import StabilVolter, MeanFirstHittingTim
 import logging
 from itertools import product
 import pandas as pd
+from tqdm import tqdm
 import matplotlib.pyplot as plt
 
 from pathlib import Path
@@ -20,7 +21,7 @@ DATABASE = Path('../data')
 logging.basicConfig(level=logging.WARNING)
 
 MARKETS = [
-    'UN', 'UW', 'JT', 'LN',
+    'UN'
 ]
 START_DATE = '2002'
 END_DATE = '2008'
@@ -28,7 +29,15 @@ SIGMA_RANGE = (1e-5, 1e5)
 
 MAX_VOLATILITY_CUT = 4
 
-PARAMETERS = {
+PARAMETERS1 = {
+    'nbins': [200, 500, 1000, 2000, 5000, 10000],
+    'start_threshold': [-0.1, -0.4, -0.6, -0.8],
+    'thresholds_spacing': [2, 1.5, 1, 0.3],
+    'tau_max': [1e8],
+    'criterion': ['PR09', 'PR075', 'SE7D'],
+}
+
+PARAMETERS2 = {
     'nbins': [100, 200, 500, 1000, 2000, 5000, 10000],
     'start_threshold': [-0.1, -0.2, -0.3, -0.4, -0.5, -0.6, -0.7, -0.8, -0.9],
     'thresholds_spacing': [2, 1.5, 1, 0.7, 0.4, 0.1],
@@ -46,7 +55,7 @@ CRITERION_CONVERSION = {
 
 def create_index():
     index = []
-    for i, params in enumerate(product(*PARAMETERS.values())):
+    for i, params in enumerate(product(*PARAMETERS1.values())):
         index = []
 
 
@@ -54,8 +63,8 @@ def main():
     for market in MARKETS:
         logging.info(f"Market: {market}")
         market_results = {}
-        for params in product(*PARAMETERS.values()):
-            current_params = dict(zip(PARAMETERS.keys(), params))
+        for params in tqdm(product(*PARAMETERS1.values())):
+            current_params = dict(zip(PARAMETERS1.keys(), params))
             # DATA EXTRACTION
             # The selection criterion and its value are nested inside a dictionary
             criterion, criterion_value = CRITERION_CONVERSION[current_params['criterion']]
@@ -82,13 +91,14 @@ def main():
             # Set maximum volatility to cut the long mfht tail
             max_volatility = indicators['Peak'] + MAX_VOLATILITY_CUT * indicators['FWHM']
             mfht = MeanFirstHittingTimes(stabilvol, nbins=nbins, max_volatility=max_volatility)
-            mfht.plot()
-
+            # mfht.plot()
             # Take MFHT indicators
             market_results[params] = mfht.indicators
 
         market_results = pd.DataFrame.from_dict(market_results, orient='index')
         market_results.to_pickle(DATABASE / f'processed/parameters/{market}_results.pickle')
+        print(f"Run saved for {market}")
+
 
 if __name__ == '__main__':
     main()
