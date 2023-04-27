@@ -20,8 +20,8 @@ class StabilVolter:
             end_level=-1.5,
             divergence_level=100,
             std_normalization=True,
-            tau_min=2,
-            tau_max=1e4,
+            tau_min: int = 2,
+            tau_max: int = 1e4,
     ):
         """
         Creates StabilVolter object with FHT analysis parameters.
@@ -53,6 +53,13 @@ class StabilVolter:
 
         # Print info
         logging.info("StabilVolter created.")
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        del self.data
+        del self.stabilvol
 
     @property
     def threshold_start(self) -> float:
@@ -173,7 +180,7 @@ class StabilVolter:
             self.stabilvol = pd.DataFrame(np.concatenate(result_matrix, axis=1).T, columns=['Volatility', 'FHT'])
         elif method == 'multi':
             # Multiprocessing method (faster)
-            pool = mp.Pool(processes=mp.cpu_count()-1)
+            pool = mp.Pool(processes=mp.cpu_count() - 1)
             result = pool.map(self.count_stock_fht, [self.data[col].values for col in self.data.columns])
             pool.close()
             self.stabilvol = pd.DataFrame(np.concatenate(result, axis=1).T, columns=['Volatility', 'FHT'])
@@ -316,7 +323,7 @@ class StabilVolter:
                         style='Window length',
                         aspect=1.2,
                         facet_kws={'legend_out': True,
-                                   'xlim': x_range,}
+                                   'xlim': x_range, }
                         )
         fig = g.figure
         suptitle = f"MFHT with Thresholds: [ {self._start:.4} / {self._end:.4} ]" if title is None else title
@@ -327,7 +334,7 @@ class StabilVolter:
             ax.grid()
             max_value = data_to_plot.loc[data_to_plot['Market'] == market]['FHT'].max()
             ax.axhline(y=max_value, color='red', linestyle='--')
-            ax.text(x_range[1]+0.01, max_value, f"Max: {max_value:.2f}", c='red')
+            ax.text(x_range[1] + 0.01, max_value, f"Max: {max_value:.2f}", c='red')
         g.add_legend()
         g.tight_layout()
         # ax.set_title(f"Thresholds: [ {self.threshold_start:.4} / {self.threshold_end:.4} ]",
@@ -342,7 +349,7 @@ class StabilVolter:
         stabilvol = stabilvol.set_index('Volatility').sort_index()
         max_value = stabilvol['FHT'].max()
         peak_position = stabilvol['FHT'].idxmax()
-        half_max_values = stabilvol.loc[stabilvol['FHT'] >= max_value/2]
+        half_max_values = stabilvol.loc[stabilvol['FHT'] >= max_value / 2]
         fwhm = half_max_values.index[-1] - half_max_values.index[0]
         indicators = {
             'Max': max_value,
@@ -397,6 +404,12 @@ class MeanFirstHittingTimes:
         # Print info
         logging.info("Mean First Hitting times initialized")
 
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        del self.raw_stabilvol
+
     @property
     def raw_stabilvol(self):
         return self._raw_stabilvol
@@ -435,24 +448,24 @@ class MeanFirstHittingTimes:
 
     @property
     def fwhm(self):
-        half_max_values = self.mfht.loc[self.mfht >= self.max_value/2]
+        half_max_values = self.mfht.loc[self.mfht >= self.max_value / 2]
         return half_max_values.index[-1] - half_max_values.index[0]
 
     @property
     def indicators(self):
         baricenters = self.baricenters
         # Baricenters widths
-        first_baricenter = baricenters[0].index[-1] - baricenters[0].index[0]
-        second_baricenter = baricenters[1].index[-1] - baricenters[1].index[0]
-        third_baricenter = baricenters[2].index[-1] - baricenters[2].index[0]
+        # first_baricenter = baricenters[0].index[-1] - baricenters[0].index[0]
+        # second_baricenter = baricenters[1].index[-1] - baricenters[1].index[0]
+        # third_baricenter = baricenters[2].index[-1] - baricenters[2].index[0]
         # Indicators width
         indicators = {
             'Max': self.max_value,
             'Peak': self.peak_position,
             'FWHM': self.fwhm,
-            'First Baricenter': first_baricenter,
-            'Second Baricenter': second_baricenter,
-            'Third Baricenter': third_baricenter,
+            # 'First Baricenter': first_baricenter,
+            # 'Second Baricenter': second_baricenter,
+            # 'Third Baricenter': third_baricenter,
         }
         return indicators
 
@@ -551,6 +564,10 @@ class MeanFirstHittingTimes:
             return None
         else:
             return ax
+
+    @raw_stabilvol.deleter
+    def raw_stabilvol(self):
+        del self._raw_stabilvol
 
 
 if __name__ == "__main__":

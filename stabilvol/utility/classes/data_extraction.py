@@ -18,8 +18,8 @@ try:
     from stabilvol.utility.classes.data_inspection import Window
     from stabilvol.utility.definitions import ROOT, MARKETS_STATS
 except ModuleNotFoundError as e:
-    logging.warning(f"Error in data_extraction: {e}")
-    from data_inspection import Window
+    logging.debug(f"Error in data_extraction: {e}")
+    from .data_inspection import Window
     from utility.definitions import ROOT
 
 
@@ -63,6 +63,12 @@ class DataExtractor:
 
         # Print info
         logging.info("DataExtractor created.")
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        del self.data
 
     @property
     def start_date(self):
