@@ -8,21 +8,33 @@ import datetime
 import random
 import string
 
-from stabilvol.utility.definitions import ROOT
+try:
+    from stabilvol.utility.definitions import ROOT
+except ModuleNotFoundError as e:
+    from utility.definitions import ROOT
 
-
-class Logger(dict):
+class Logger:
     def __init__(self):
         # Create random ID
         random_string = str(random.randint(0, 999999)).zfill(6)
         random_letter = random.choice(string.ascii_uppercase)
-        self.id = random_string + random_letter
+        self._id = random_string + random_letter
 
         self.log: dict = {}
         self.inputs: dict = {}
         self.filepath = ROOT / 'data/logs/logs.json'
 
         logging.info("Logger created")
+
+    def __repr__(self):
+        return f"Logger(ID={self.id})"
+
+    def __str__(self):
+        return f"{self.id}"
+
+    @property
+    def id(self):
+        return self._id
 
     def gather_inputs(self, *classes, **kwargs):
         inputs = {'Date': str(datetime.datetime.now()),
@@ -36,13 +48,14 @@ class Logger(dict):
         return self.inputs
 
     def create_log(self):
+        logs_dict = {}
         if self.filepath.exists():
             try:
                 # Read existing data and append new
                 with open(self.filepath, 'r') as logs_file:
                     logs_dict = json.load(logs_file)
             except json.JSONDecodeError:
-                logs_dict = {}
+                pass
             finally:
                 logs_dict.update(self.log)
         else:
@@ -64,7 +77,7 @@ class Logger(dict):
         """ Recreate the random ID """
         random_string = str(random.randint(0, 999999)).zfill(6)
         random_letter = random.choice(string.ascii_uppercase)
-        self.id = random_string + random_letter
+        self._id = random_string + random_letter
         return self
 
     def lookup_logs(self, inputs):
@@ -96,7 +109,7 @@ if __name__ == '__main__':
     meta_data = {
         'Market': 'UN',
     }
-    accountant = DataExtractor()
+    accountant = DataExtractor(start_date='2010-01-01', end_date='2020-01-01')
     analyst = StabilVolter()
 
     logger = Logger()
