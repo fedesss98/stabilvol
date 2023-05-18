@@ -52,17 +52,6 @@ class App(tk.Tk):
         self.rowconfigure(3, weight=2)
         self.rowconfigure(4, weight=1)
 
-        # Objects
-        self.datas = []  # Rerturns DataFrame from different markets
-        self.logger = Logger()
-        self.accountant = DataExtractor()
-        self.analyst = StabilVolter()
-        self.fhts = {}
-        self.pdfs = {}
-        self.mfhts = {}
-        self.log_index = {}
-        self.accountant_index = {}
-
         # VARIABLES
         # Market selection
         self.available_markets = tk.Variable(self, value=list(MARKETS), name='markets')
@@ -98,6 +87,18 @@ class App(tk.Tk):
         self.settings = None
         self.progress_window = None
         self.stack.set("Nothing")
+
+        # Objects
+        self.datas = []  # Rerturns DataFrame from different markets
+        self.logger = Logger()
+        self.accountant = DataExtractor(start_date=self.start_date.get(),
+                                        end_date=self.end_date.get())
+        self.analyst = StabilVolter()
+        self.fhts = {}
+        self.pdfs = {}
+        self.mfhts = {}
+        self.log_index = {}
+        self.accountant_index = {}
 
     @property
     def inputs(self):

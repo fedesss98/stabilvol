@@ -520,7 +520,8 @@ class StabilvolFrame(ttk.LabelFrame):
         self.save = tk.BooleanVar(self, value=False, name='save')
 
         # Objects
-        self.accountant = DataExtractor()
+        self.accountant = DataExtractor(start_date=self.start_date.get(),
+                                        end_date=self.end_date.get(),)
         self.datas = []
         self.analyst = StabilVolter()
         self.stabilvols = []
