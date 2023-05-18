@@ -38,11 +38,11 @@ PARAMETERS1 = {
 }
 
 PARAMETERS2 = {
-    'nbins': [100, 200, 500, 1000, 2000, 5000, 10000],
-    'start_threshold': [-0.1, -0.2, -0.3, -0.4, -0.5, -0.6, -0.7, -0.8, -0.9],
-    'thresholds_spacing': [2, 1.5, 1, 0.7, 0.4, 0.1],
+    'nbins': [200, 500, 1000, 2000, 5000, 10000],
+    'start_threshold': [0.0, -0.5, -0.8, -0.9],
+    'thresholds_spacing': [2, 1.5, 1, 0.4],
     'tau_max': [1e8, 1e6, 1e4, 1e3],
-    'criterion': ['PR09', 'PR075', 'PR05', 'SE7D'],
+    'criterion': ['PR09', 'PR075', 'PR05'],
 }
 
 CRITERION_CONVERSION = {
@@ -85,6 +85,8 @@ def main():
                 end_level=current_params['start_threshold'] - current_params['thresholds_spacing'],
                 tau_max=current_params['tau_max'])
             stabilvol = analyst.get_stabilvol(data, 'multi')
+            if len(stabilvol) < 1000:
+                raise ValueError(f"Too little stabilvol data: {len(stabilvol)} rows")
             indicators = analyst.get_indicators(stabilvol)
             # FHT AVERAGING
             nbins = current_params['nbins']
