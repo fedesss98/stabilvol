@@ -545,20 +545,25 @@ class MeanFirstHittingTimes:
         stabilvol_binned = smoothed.groupby('ranges').mean().set_index('Volatility')
         self.mfht = stabilvol_binned.squeeze()
 
-    def plot(self, ax=None, edit=False):
+    def plot(self, ax=None, indicators=True, edit=False, invisible=False):
         if ax is None:
             fig, ax = plt.subplots(figsize=(10, 6))
             fig.suptitle('Mean First Hitting Times')
         ax.set_title(f'{self.nbins} bins')
-        self.mfht.reset_index().plot(x='Volatility', y='FHT', kind='scatter', ax=ax)
-        ax.axhline(y=self.max_value, ls='--', c='r')
-        ax.axvline(x=self.peak_position, ls='--', c='r')
-        # Second baricenter area
-        baricenters = self.baricenters
-        ax.axvspan(baricenters[1].index[0], baricenters[1].index[-1], color='r', alpha=0.2)
-        ax.axvspan(baricenters[1].index[0], baricenters[1].index[-1], color='g', alpha=0.2)
-        ax.axvspan(baricenters[1].index[0], baricenters[1].index[-1], color='b', alpha=0.2)
-        ax.scatter(x=self.peak_position, y=self.max_value, c='r')
+        alpha = 0.0 if invisible else 1.0
+        self.mfht.reset_index().plot(x='Volatility', y='FHT', kind='scatter', ax=ax, alpha=alpha)
+        if indicators:
+            ax.axhline(y=self.max_value, ls='--', c='r')
+            ax.axvline(x=self.peak_position, ls='--', c='r')
+            # Second baricenter area
+            baricenters = self.baricenters
+            left_range = float(self.peak_position) - self.fwhm / 2
+            right_range = float(self.peak_position) + self.fwhm / 2
+            ax.axvspan(left_range, right_range, color='r', alpha=0.2)
+            # ax.axvspan(baricenters[1].index[0], baricenters[1].index[-1], color='r', alpha=0.2)
+            # ax.axvspan(baricenters[1].index[0], baricenters[1].index[-1], color='g', alpha=0.2)
+            # ax.axvspan(baricenters[1].index[0], baricenters[1].index[-1], color='b', alpha=0.2)
+            ax.scatter(x=self.peak_position, y=self.max_value, c='r')
         if not edit:
             plt.show()
             return None
