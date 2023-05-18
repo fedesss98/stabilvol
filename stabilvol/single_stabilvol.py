@@ -11,10 +11,10 @@ from pathlib import Path
 DATABASE = Path('../data/interim')
 
 MARKET = 'UN'
-START_DATE = '1986'
-END_DATE = '1998'
+START_DATE = '1990-01-01'
+END_DATE = '2022'
 CRITERION = 'percentage'
-VALUE = 0
+VALUE = 0.8
 
 START_LEVEL = -0.1
 END_LEVEL = -1.5
@@ -33,7 +33,8 @@ def print_indicators_table(header, indicators):
     print(f"|{'Key':^{keys_width}}|{'Value':^{values_width}}|")
     print(f"{'-' * table_width}")
     for key, value in indicators.items():
-        print(f"|{key:<{keys_width}}|{value:^{values_width}}|")
+        value_str = str(value) if not isinstance(value, tuple) else ', '.join(map(str, value))
+        print(f"|{key:<{keys_width}}|{value_str:^{values_width}}|")
     print(f"{'-' * table_width}")
 
 
@@ -64,12 +65,9 @@ if __name__ == '__main__':
     print_indicators_table('FHT Indicators'.upper(), indicators)
     analyst.plot_fht()
     plt.show()
-    mfht = MeanFirstHittingTimes(stabilvol, nbins=6000, max_volatility=0.2)
+    mfht = MeanFirstHittingTimes(stabilvol, nbins=1000, max_volatility=0.2)
     baricenters = mfht.baricenters
     mfht_indicators = mfht.indicators
-    mfht.plot()
     print_indicators_table('MFHT Indicators'.upper(), mfht_indicators)
-    mfht2 = MeanFirstHittingTimes(mfht.values, nbins=500)
-    mfht2.plot()
-    mfht_indicators = mfht2.indicators
-    print_indicators_table('MFHT2 Indicators'.upper(), mfht_indicators)
+    mfht.plot()
+    mfht.plot(invisible=True)
