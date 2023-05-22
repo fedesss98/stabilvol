@@ -144,6 +144,62 @@ Elapsed time: 0:58:21.67
         UW: 926899H
         JT: 781892G
 Elapsed time: 0:58:19.79
+16) 1990 to 2020 every 2 months, 2-years windows,
+    thresholds [-0.1; -2.0],
+    500 bins
+    LOG IDS:
+        UN: 048676L
+        LN: 897626F
+        UW: 960615A
+        JT: 821663I
+Elapsed time: 1:16:13.7421
+17) 1990 to 2020 every 2 months, 2-years windows,
+    thresholds [0.0; -1.0],
+    2000 bins
+    LOG IDS:
+        UN: 778268L
+        LN: 078472F
+        UW: 635896G
+        JT: 349950Z
+Elapsed time: 1:09:59.51
+18) 1990 to 2020 every 2 months, 2-years windows,
+    thresholds [-0.1; -2.5],
+    2000 bins
+    LOG IDS:
+        UN: 792644H
+        LN: 379283H
+        UW: 467421T
+        JT: 459347R
+Elapsed time: 1:09:23.77
+19) 1990 to 2020 every 2 months, 2-years windows,
+    thresholds [-0.1; -3.0],
+    2000 bins
+    LOG IDS:
+        UN: 619996D
+        LN: 788769K
+        UW: 993583A
+        JT: 388030Z
+Elapsed time:  1:12:22.55
+20) 1990 to 2020 every 2 months, 2-years windows,
+    thresholds [-0.1; -3.0],
+    1000 bins
+    LOG IDS:
+Elapsed time:
+21) 1990 to 2020 every 2 months, 2-years windows,
+    thresholds [-0.1; -3.0],
+    500 bins
+    LOG IDS:
+Elapsed time:
+22) 1990 to 2020 every 2 months, 2-years windows,
+    thresholds [-0.1; -1.0],
+    2000 bins
+    LOG IDS:
+Elapsed time:
+23) 1990 to 2020 every 2 months, 2-years windows,
+    thresholds [-0.1; -1.0],
+    1000 bins
+    LOG IDS:
+Elapsed time:
 """
 from utility.classes.data_extraction import DataExtractor
 from utility.classes.stability_analysis import StabilVolter, MeanFirstHittingTimes
@@ -164,23 +220,25 @@ START_DATE = '1990-01-01'
 END_DATE = '2020-01-01'
 FREQ = '2M'
 
-EXPERIMENT = 'dynamics_15'
+EXPERIMENT = 'dynamics_18'
 
 COMMON_EXTRACTOR_DICT = {
-    'duration': 1,
+    'duration': 2,
     'criterion': 'startend',
     'criterion_value': '7d',
 }
 
 COMMON_ANALYSIS_DICT = {
     'start_level': -0.1,
-    'end_level': -2.5,
+    'end_level': -3.0,
     'tau_max': 1e6,
 }
 
 COMMON_MFHT_DICT = {
-    'nbins': 1000,
+    'nbins': 2000,
 }
+
+MINIMUM_STABILVOL_LEN = 800
 
 
 # def retrieve_data(start_date, market):
@@ -215,7 +273,7 @@ def retrieve_data(start_date, market):
 def get_stabilvol(data):
     analyst = StabilVolter(**COMMON_ANALYSIS_DICT)
     stabilvol = analyst.get_stabilvol(data, 'multi')
-    if len(stabilvol) < 1000:
+    if len(stabilvol) < MINIMUM_STABILVOL_LEN:
         raise ValueError(f"Too little stabilvol data: {len(stabilvol)} rows")
     indicators = analyst.get_indicators(stabilvol)
     del analyst
