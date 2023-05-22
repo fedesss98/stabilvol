@@ -140,6 +140,8 @@ class StabilVolter:
         counting = False
         fht = []
         volatility = []
+        starts = []
+        ends = []
         start_t = 0
         # Ignore datetime indexes for iteration, use only integers
         for t, level in enumerate(series):
@@ -157,8 +159,10 @@ class StabilVolter:
                     local_volatility = series[start_t: end_t].std(ddof=1)
                     fht.append(counting_time)
                     volatility.append(local_volatility)
+                    starts.append(start_t)
+                    ends.append(end_t)
         # Gather data in a DataFrame
-        stock_stabilvol = np.array([volatility, fht])
+        stock_stabilvol = np.array([volatility, fht, starts, ends])
         if squeeze:
             stock_stabilvol = stock_stabilvol.flatten()
         return stock_stabilvol
@@ -183,7 +187,7 @@ class StabilVolter:
             pool = mp.Pool(processes=mp.cpu_count() - 1)
             result = pool.map(self.count_stock_fht, [self.data[col].values for col in self.data.columns])
             pool.close()
-            self.stabilvol = pd.DataFrame(np.concatenate(result, axis=1).T, columns=['Volatility', 'FHT'])
+            self.stabilvol = pd.DataFrame(np.concatenate(result, axis=1).T, columns=['Volatility', 'FHT', 'start', 'end'])
         else:
             # Numpy method
             np.apply_along_axis(self.count_stock_fht, 0, self.data.values)
