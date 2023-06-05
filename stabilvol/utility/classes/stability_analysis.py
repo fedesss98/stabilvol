@@ -132,7 +132,7 @@ class StabilVolter:
         divergence_limit = divergence_limit if divergence_limit is not None else self.divergence_limit
         # Make series continuous
         if isinstance(series, pd.Series):
-            series = series.dropna().values
+            series = series.dropna()
         elif isinstance(series, np.ndarray):
             series = series[~np.isnan(series)]
         else:
@@ -143,29 +143,40 @@ class StabilVolter:
         starts = []
         ends = []
         start_t = 0
+        start_counting_date = pd.Timestamp('1980-01-01')
         # Ignore datetime indexes for iteration, use only integers
-        for t, level in enumerate(series):
+        for t, (date, level) in enumerate(series.items()):
             if not counting and start_level <= level < divergence_limit:
                 # Start counting
                 counting = True
                 start_t = t
+                start_counting_date = date
             if counting and level < end_level:
                 # Stop counting and take FHT
                 counting = False
                 end_t = t
+                end_counting_date = date
                 counting_time = end_t - start_t
                 if self.tau_min <= counting_time <= self.tau_max:
                     # Append FHT and Volatility
                     local_volatility = series[start_t: end_t].std(ddof=1)
                     fht.append(counting_time)
                     volatility.append(local_volatility)
-                    starts.append(start_t)
-                    ends.append(end_t)
+                    starts.append(start_counting_date)
+                    ends.append(end_counting_date)
         # Gather data in a DataFrame
         stock_stabilvol = np.array([volatility, fht, starts, ends])
         if squeeze:
             stock_stabilvol = stock_stabilvol.flatten()
         return stock_stabilvol
+
+    @staticmethod
+    def __format_results(result: np.ndarray) -> pd.DataFrame:
+        stabilvol = pd.DataFrame(np.concatenate(result, axis=1).T,
+                                      columns=['Volatility', 'FHT', 'start', 'end'], )
+        stabilvol['Volatility'] = pd.to_numeric(stabilvol['Volatility'], errors='coerce')
+        stabilvol['FHT'] = pd.to_numeric(stabilvol['FHT'], errors='coerce')
+        return stabilvol
 
     def get_stabilvol(self, data=None, method='pandas', **frame_info) -> pd.DataFrame:
         """
@@ -185,9 +196,9 @@ class StabilVolter:
         elif method == 'multi':
             # Multiprocessing method (faster)
             pool = mp.Pool(processes=mp.cpu_count() - 1)
-            result = pool.map(self.count_stock_fht, [self.data[col].values for col in self.data.columns])
+            result = pool.map(self.count_stock_fht, [self.data[col] for col in self.data.columns])
             pool.close()
-            self.stabilvol = pd.DataFrame(np.concatenate(result, axis=1).T, columns=['Volatility', 'FHT', 'start', 'end'])
+            self.stabilvol = self.__format_results(result)
         else:
             # Numpy method
             np.apply_along_axis(self.count_stock_fht, 0, self.data.values)
