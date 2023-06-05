@@ -13,6 +13,7 @@ import pandas as pd
 from pandas.tseries.offsets import DateOffset
 from pathlib import Path
 import seaborn as sns
+from sqlalchemy import create_engine
 
 try:
     from stabilvol.utility.classes.data_inspection import Window
@@ -248,6 +249,34 @@ class DataExtractor:
         self.data = df
         return df
 
+    def read_sql(self, market, start_level, end_level):
+        selection_type = 'trapezoidal_selection' if self._criterion == 'percentage' else 'rectangular_selection'
+        database_dir = ROOT / f'data/processed/{selection_type}/stabilvol.sqlite'
+        # SAVE TO DATABASE
+        engine = create_engine(f'sqlite:///{database_dir}')
+        start_threshold_string = str(start_level).replace('-', 'm').replace('.', 'p')
+        end_threshold_string = str(end_level).replace('-', 'm').replace('.', 'p')
+        table_name = f"stabilvol_{start_threshold_string}_{end_threshold_string}"
+        market_query = " AND "
+        if self.start_date is None and self.end_date is None:
+            query = f'SELECT * FROM {table_name}'
+            market_query = " WHERE "
+        elif self.start_date is None:
+            query = f"SELECT * FROM {table_name} WHERE end < '{self.end_date}'"
+        elif self.end_date is None:
+            query = f"SELECT * FROM {table_name} WHERE start > '{self.start_date}'"
+        else:
+            query = f"SELECT * FROM {table_name} WHERE start > '{self.start_date}' AND end < '{self.end_date}'"
+        if market is not None:
+            market_query += f"market = '{market}'"
+        df = pd.read_sql(query + market_query, con=engine)
+        return df
+
+    def extract_stabilvol_from_database(self, market, start_level, end_level):
+        """ Read stabilvol data directly from SQL database """
+        stabilvol = self.read_sql(market, start_level, end_level)
+        return stabilvol
+
     def plot_selection(self, edit=False):
         avg_min = self.data.min().median()
         avg_max = self.data.max().median()
@@ -280,8 +309,8 @@ if __name__ == "__main__":
     logging.basicConfig(format='%(levelname)s: %(asctime)s - %(message)s', level=logging.INFO)
 
     market = 'UW'
-    start = None
-    end = None
+    start = '2010'
+    end = '2022'
     criterion = 'percentage'
     value = .0
     sigma_range = (0, 1e5)
@@ -290,8 +319,9 @@ if __name__ == "__main__":
                                criterion=criterion,
                                criterion_value=value,
                                sigma_range=sigma_range)
-    data = accountant.extract_data(ROOT / f'data/interim/{market}.pickle')
-    accountant.plot_selection()
-    assert isinstance(data, pd.DataFrame)
-    assert len(data.columns) > 0, "There are no data with selected criterion"
-    assert len(data.columns) == MARKETS_STATS[market][1], "There are less data than original dataframe"
+    # data = accountant.extract_data(ROOT / f'data/interim/{market}.pickle')
+    # accountant.plot_selection()
+    # assert isinstance(data, pd.DataFrame)
+    # assert len(data.columns) > 0, "There are no data with selected criterion"
+    # assert len(data.columns) == MARKETS_STATS[market][1], "There are fewer data than original dataframe"
+    stabilvol = accountant.extract_stabilvol_from_database(market, -0.1, -1.0)
