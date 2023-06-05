@@ -151,7 +151,7 @@ class StabilVolter:
                 counting = True
                 start_t = t
                 start_counting_date = date
-            if counting and abs(level) < abs(end_level) or abs(level) >= divergence_limit:
+            if counting and abs(level) > abs(end_level) or level >= divergence_limit:
                 # Stop counting and take FHT
                 counting = False
                 end_t = t
