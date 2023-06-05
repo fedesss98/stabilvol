@@ -146,12 +146,12 @@ class StabilVolter:
         start_counting_date = pd.Timestamp('1980-01-01')
         # Ignore datetime indexes for iteration, use only integers
         for t, (date, level) in enumerate(series.items()):
-            if not counting and start_level <= level < divergence_limit:
+            if not counting and abs(level) <= abs(start_level) and abs(level) < divergence_limit:
                 # Start counting
                 counting = True
                 start_t = t
                 start_counting_date = date
-            if counting and level < end_level:
+            if counting and abs(level) < abs(end_level) or abs(level) >= divergence_limit:
                 # Stop counting and take FHT
                 counting = False
                 end_t = t
