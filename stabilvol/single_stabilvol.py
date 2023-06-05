@@ -10,7 +10,7 @@ from pathlib import Path
 DATABASE = Path('../data/interim')
 
 MARKET = 'UN'
-START_DATE = '2010-01-01'
+START_DATE = '2020-01-01'
 END_DATE = '2022-07-01'
 CRITERION = 'percentage'
 VALUE = 0.05
@@ -37,11 +37,11 @@ def print_indicators_table(header, indicators):
     print(f"{'-' * table_width}")
 
 
-def get_stabilvol(accountant, analyst):
-    data = accountant.extract_data(DATABASE / f'{MARKET}.pickle')
+def get_stabilvol(market, accountant, analyst):
+    data = accountant.extract_data(DATABASE / f'{market}.pickle')
 
     analysis_info = {
-        'Market': MARKET,
+        'Market': market,
         # 'Start date': accountant.start_date.strftime("%Y-%m-%d"),
         # 'Window length': int(accountant.window.length.days / 365.2425)
     }
@@ -49,9 +49,7 @@ def get_stabilvol(accountant, analyst):
     return stabilvol
 
 
-if __name__ == '__main__':
-    from datetime import datetime
-
+def main():
     accountant = DataExtractor(
         start_date=START_DATE,
         end_date=END_DATE,
@@ -66,18 +64,32 @@ if __name__ == '__main__':
 
     # GET STABILVOL
     start_time = datetime.now()
-    stabilvol = get_stabilvol(accountant, analyst)
+    stabilvol = get_stabilvol(MARKET, accountant, analyst)
     end_time = datetime.now()
-    print(f"\n\nStabilvol calculated in {end_time-start_time} seconds\n\n")
-
+    print(f"\n\nStabilvol calculated in {end_time - start_time} seconds\n\n")
+    stabilvol_saved = accountant.extract_stabilvol_from_database(MARKET, START_LEVEL, END_LEVEL)
     # STATISTICS
-    print_indicators_table('FHT Indicators'.upper(), analyst.get_indicators(stabilvol))
-    analyst.plot_fht()
-    plt.show()
-
+    print_indicators_table('FHT Indicators'.upper(),
+                           analyst.get_indicators(stabilvol))
+    print_indicators_table('Saved FHT Indicators'.upper(),
+                           analyst.get_indicators(stabilvol_saved))
+    # analyst.plot_fht()
+    # plt.show()
     # GET MFHT
     mfht = MeanFirstHittingTimes(stabilvol, nbins=NBINS, max_volatility=0.2)
+    mfht_saved = MeanFirstHittingTimes(stabilvol_saved, nbins=NBINS, max_volatility=0.2)
     # STATISTICS
-    baricenters = mfht.baricenters
     print_indicators_table('MFHT Indicators'.upper(), mfht.indicators)
+    print_indicators_table('Saved MFHT Indicators'.upper(), mfht_saved.indicators)
     mfht.plot()
+    mfht_saved.plot()
+    return None
+
+
+if __name__ == '__main__':
+    from datetime import datetime
+
+    start_time = datetime.now()
+    main()
+    end_time = datetime.now()
+    print(f"Time elapsed: {end_time - start_time}")
