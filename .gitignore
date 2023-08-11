@@ -1,5 +1,6 @@
 # Ignore data files
 data/
+static/
 
 # Ignore ipybb checkpoints
 notebooks/
