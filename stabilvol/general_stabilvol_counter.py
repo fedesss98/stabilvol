@@ -29,7 +29,12 @@ CRITERION = 'percentage'
 VALUE = 0.05
 
 START_LEVEL = 0.1
-END_LEVEL = -1.5
+START_LEVELS = [0.1, 0.2, 0.5, 1.0, 2.0]
+DELTAS = [0.1, 0.2, 0.5, 1.0, 2.0]
+END_LEVEL = 50.0
+LEVELS = {
+    (start, start+delta) for start in START_LEVELS for delta in DELTAS
+}
 TAU_MAX = 1000000
 
 DATABASE = ROOT / 'data/interim'
@@ -72,7 +77,7 @@ def main():
 
         # STATISTICS
         print_indicators_table('FHT Indicators'.upper(), analyst.get_indicators(stabilvol))
-        analyst.plot_fht()
+        analyst.plot_fht(title=f"{market} FHT")
         plt.show()
 
         stabilvols.append(stabilvol)
