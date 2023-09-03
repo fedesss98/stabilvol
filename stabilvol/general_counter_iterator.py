@@ -6,14 +6,14 @@ ______________________________________________________________________
 theta i |                    theta f
 -0.1    |   0.0   0.1   0.4   0.9   1.9  -0.2  -0.3  -0.6  -1.1  -2.1 \n
 -0.2    |  -0.1   0.0   0.3   0.8   1.8  -0.3  -0.4  -0.7  -1.2  -2.2 \n
--0.5    |  -0.4  -0.3  0.0   0.5   1.5  -0.6  -0.7  -1.0  -1.5  -2.5  \n
--1.0    |  -0.9  -0.8  -0.5  0.0   1.0  -1.1  -1.2  -1.5  -2.0  -3.0  \n
--2.0    |  -1.9  -1.8  -1.5  -1.0  0.0  -2.1  -2.2  -2.5  -3.0  -4.0  \n
+-0.5    |  -0.4  -0.3   0.0   0.5   1.5  -0.6  -0.7  -1.0  -1.5  -2.5 \n
+-1.0    |  -0.9  -0.8  -0.5   0.0   1.0  -1.1  -1.2  -1.5  -2.0  -3.0 \n
+-2.0    |  -1.9  -1.8  -1.5  -1.0   0.0  -2.1  -2.2  -2.5  -3.0  -4.0 \n
  0.1    |   0.2   0.3   0.6   1.1   2.1   0.0  -0.1  -0.4  -0.9  -1.9 \n
  0.2    |   0.3   0.4   0.7   1.2   2.2   0.1   0.0  -0.3  -0.8  -1.8 \n
  0.5    |   0.6   0.7   1.0   1.5   2.5   0.4   0.3   0.0  -0.5  -1.5 \n
  1.0    |   1.1   1.2   1.5   2.0   3.0   0.9   0.8   0.5   0.0  -1.0 \n
- 2.0    |   2.1   2.2   2.5   3.0   4.0   1.9   1.8   1.5   1.0  0.0  \n
+ 2.0    |   2.1   2.2   2.5   3.0   4.0   1.9   1.8   1.5   1.0   0.0 \n
 ______________________________________________________________________
 """
 
@@ -21,6 +21,7 @@ from utility.definitions import ROOT
 from utility.classes.data_extraction import DataExtractor
 from utility.classes.stability_analysis import StabilVolter
 from single_stabilvol import print_indicators_table, get_stabilvol
+from utility.functions import list_database_thresholds
 
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -34,7 +35,7 @@ CRITERION = 'percentage'
 VALUE = 0.05
 
 START_LEVELS = [-0.1, -0.2, -0.5, -1.0, -2.0]
-DELTAS = [0.1, 0.2, 0.5, 1.0, 2.0]
+DELTAS = [-0.1, -0.2, -0.5, -1.0, -2.0]
 LEVELS = {
     (start, start+delta) for start in START_LEVELS for delta in DELTAS
 }
@@ -43,9 +44,7 @@ TAU_MAX = 1000000
 DATABASE = ROOT / 'data/interim'
 
 
-def save_to_database(stabilvol: pd.DataFrame, start_level: float, end_level: float):
-    selection_type = 'trapezoidal_selection' if CRITERION == 'percentage' else 'rectangular_selection'
-    database_dir = ROOT / f'data/processed/{selection_type}/stabilvol.sqlite'
+def save_to_database(database_dir, stabilvol: pd.DataFrame, start_level: float, end_level: float):
     # SAVE TO DATABASE
     engine = sqlalchemy.create_engine(f'sqlite:///{database_dir}')
     start_threshold_string = str(start_level).replace('-', 'm').replace('.', 'p')
@@ -70,8 +69,22 @@ def main():
     (-0.1, 0.0), (-1.0, -0.9), (-0.2, 0.3), (-0.2, 0.8), (-2.0, -1.8), 
     (-0.1, 0.4), (-0.1, 0.9), (-1.0, -0.5), (-1.0, 0.0), (-2.0, 0.0 ), 
     (-0.5, -0.3), (-0.5, 1.5), (-2.0, -1.9), (-0.5, -0.4), (-2.0, -1.5)}
+    for positive deltas
+    {(-0.2, -2.2), (-1.0, -1.1), (-0.1, -2.1), (-1.0, -2.0), (-2.0, -2.5),
+    (-0.5, -0.6), (-1.0, -1.2), (-2.0, -2.1), (-0.5, -1.5), (-0.2, -0.7),
+    (-0.5, -0.7), (-2.0, -2.2), (-1.0, -3.0), (-2.0, -3.0), (-0.1, -0.6), 
+    (-0.2, -0.30000000000000004), (-0.5, -1.0), (-0.5, -2.5), (-0.1, -0.2), 
+    (-0.1, -1.1), (-0.2, -0.4), (-0.2, -1.2), (-1.0, -1.5), (-2.0, -4.0), 
+    (-0.1, -0.30000000000000004)}
+    for negative deltas
     """
+    selection_type = 'trapezoidal_selection' if CRITERION == 'percentage' else 'rectangular_selection'
+    database_dir = ROOT / f'data/processed/{selection_type}/stabilvol.sqlite'
+    saved_levels = list_database_thresholds(database_dir).values.tolist()
     for start_level, end_level in LEVELS:
+        if [start_level, end_level] in saved_levels:
+            print(f"Skipping {start_level, end_level}...")
+            continue
         stabilvols = []
         analyst = StabilVolter(
             start_level=start_level,
@@ -94,7 +107,7 @@ def main():
             stabilvols.append(stabilvol)
 
         stabilvols = pd.concat(stabilvols, axis=0)
-        save_to_database(stabilvols, start_level, end_level)
+        save_to_database(database_dir, stabilvols, start_level, end_level)
     return None
 
 

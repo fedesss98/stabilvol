@@ -6,6 +6,8 @@ Utility functions
 import sqlite3
 import pandas as pd
 from sqlalchemy import create_engine
+import re
+
 
 def check_input_market(market):
     available_markets = {'GF', 'JT', 'LN', 'UN', 'UW'}
@@ -32,6 +34,51 @@ def list_database_tables(database):
     tables = cursor.fetchall()
     for table in tables:
         print(table[0])
+    cursor.close()
+    conn.close()
+
+
+def extract_t1_t2(table_name: str) -> tuple:
+    """ Extract thresholds t1 and t2 from a table name """
+    t1 = table_name.split('_')[1]
+    t2 = table_name.split('_')[2]
+    t1 = t1.replace('m', '-').replace('p', '.')
+    t2 = t2.replace('m', '-').replace('p', '.')
+    return round(float(t1), 2), round(float(t2), 2)
+
+
+def list_database_thresholds(database) -> pd.DataFrame:
+    # Connect to the SQLite database
+    conn = sqlite3.connect(database)
+    cur = conn.cursor()
+
+    # Query the database to get all table names
+    cur.execute("SELECT name FROM sqlite_master WHERE type='table'")
+    table_names = cur.fetchall()
+
+    # Extract the values of t1 and t2 from each table name
+    results = []
+    for table_name in table_names:
+        try:
+            t1, t2 = extract_t1_t2(table_name[0])
+        except TypeError:
+            pass
+        else:
+            results.append((t1, t2))
+
+    thresholds = pd.DataFrame(results, columns=['Start', 'End'])
+    # Print thresholds
+    print(f"{'Start Threshold':^16}\t{'End Thresholds':^25}")
+    for t1, t2_group in thresholds.groupby('Start'):
+        print(f"{' '*5}{t1:>6}{' '*5}", end='\t')
+        for t2 in t2_group['End']:
+            print(f"{t2:>6}", end=' ')
+        print()
+
+    # Close the database connection
+    cur.close()
+    conn.close()
+    return thresholds
 
 
 def query_data(database, query):
@@ -42,4 +89,5 @@ def query_data(database, query):
 
 
 if __name__ == "__main__":
-    ask_for_market()
+    database = "../../data/processed/trapezoidal_selection/stabilvol.sqlite"
+    list_database_thresholds(database)
