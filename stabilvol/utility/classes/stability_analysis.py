@@ -105,7 +105,7 @@ class StabilVolter:
 
     @property
     def inputs(self) -> dict:
-        input_dict = {
+        return {
             'threshold_start': self._start,
             'threshold_end': self._end,
             'divergence': self._divergence,
@@ -113,7 +113,6 @@ class StabilVolter:
             'tau_max': self.tau_max,
             'nbins': self.nbins,
         }
-        return input_dict
 
     def count_stock_fht(
             self, series, squeeze=False, threshold_start=None, threshold_end=None, divergence_limit=None
@@ -203,7 +202,7 @@ class StabilVolter:
             # Numpy method
             np.apply_along_axis(self.count_stock_fht, 0, self.data.values)
         # stabilvol = stabilvol_frame.melt(ignore_index=False, value_name='FHT', var_name='Stock').dropna()
-        for info in frame_info.keys():
+        for info in frame_info:
             self.stabilvol[info] = frame_info[info]
         return self.stabilvol
 
@@ -238,8 +237,7 @@ class StabilVolter:
         sns.heatmap(self.data_states.T,
                     cmap='coolwarm',
                     ax=ax)
-        fig.suptitle(f"Returns States",
-                     fontsize=24)
+        fig.suptitle("Returns States", fontsize=24)
         ax.set_title(f"Thresholds: [ {self.threshold_start:.4} / {self.threshold_end:.4} ]",
                      fontsize=16)
         ax.set_ylabel('Stocks', fontsize=24)
@@ -322,7 +320,7 @@ class StabilVolter:
         return None
 
     def plot_mfht(self, *data_to_plot, title=None, x_range=None, edit=False, ):
-        if len(data_to_plot) == 0:
+        if not data_to_plot:
             data_to_plot = [self.stabilvol_binned]
         data_to_plot = [mfht[mfht['Volatility'].between(*x_range)] for mfht in data_to_plot]
         data_to_plot = pd.concat(data_to_plot)
@@ -366,13 +364,12 @@ class StabilVolter:
         peak_position = stabilvol['FHT'].idxmax()
         half_max_values = stabilvol.loc[stabilvol['FHT'] >= max_value / 2]
         fwhm = half_max_values.index[-1] - half_max_values.index[0]
-        indicators = {
+        return {
             'Max': max_value,
             'Peak': peak_position,
             'FWHM': fwhm,
             'HM Range': (half_max_values.index[0], half_max_values.index[-1]),
         }
-        return indicators
 
     def save_fht(self, data_to_save=None, market=None, filename=None, format='pickle', *args):
         data_to_save = self.stabilvol if data_to_save is None else data_to_save
@@ -469,12 +466,7 @@ class MeanFirstHittingTimes:
     @property
     def indicators(self):
         baricenters = self.baricenters
-        # Baricenters widths
-        # first_baricenter = baricenters[0].index[-1] - baricenters[0].index[0]
-        # second_baricenter = baricenters[1].index[-1] - baricenters[1].index[0]
-        # third_baricenter = baricenters[2].index[-1] - baricenters[2].index[0]
-        # Indicators width
-        indicators = {
+        return {
             'Max': self.max_value,
             'Peak': self.peak_position,
             'FWHM': self.fwhm,
@@ -482,7 +474,6 @@ class MeanFirstHittingTimes:
             # 'Second Baricenter': second_baricenter,
             # 'Third Baricenter': third_baricenter,
         }
-        return indicators
 
     @property
     def values(self, mode='pandas'):
@@ -551,8 +542,7 @@ class MeanFirstHittingTimes:
         stabilvol['ranges'] = pd.cut(stabilvol['Volatility'], bins=bins, include_lowest=True)
         # Classify inliers that are inside 6 standard deviations
         inliers = stabilvol.groupby('ranges').apply(self.classify_inliers, std_range=2)
-        stabilvol_smoothed = stabilvol.loc[inliers.values]
-        return stabilvol_smoothed
+        return stabilvol.loc[inliers.values]
 
     def make_average_stabilvol(self):
         filtered = self.filter_stabilvol(self.raw_stabilvol, self.max_volatility)
@@ -579,11 +569,10 @@ class MeanFirstHittingTimes:
             # ax.axvspan(baricenters[1].index[0], baricenters[1].index[-1], color='g', alpha=0.2)
             # ax.axvspan(baricenters[1].index[0], baricenters[1].index[-1], color='b', alpha=0.2)
             ax.scatter(x=self.peak_position, y=self.max_value, c='r')
-        if not edit:
-            plt.show()
-            return None
-        else:
+        if edit:
             return ax
+        plt.show()
+        return None
 
     @raw_stabilvol.deleter
     def raw_stabilvol(self):
@@ -605,14 +594,16 @@ if __name__ == "__main__":
     # Check last stabilvol
     # stabilvol1 = analyst.count_stock_fht(data.iloc[:, 2])
     stabilvol = analyst.get_stabilvol(data)
-    given_stabilvol = np.array([
-        [np.sqrt(2), 2],
-        [np.sqrt(2 / 2), 3],
-        [np.sqrt(2), 2],
-        [np.sqrt(2 / 4), 5],
-        [np.sqrt(2 / 3), 4],
-        [np.sqrt(2 / 3), 4],
-        [np.sqrt(2 / 1), 2]
-    ])
+    given_stabilvol = np.array(
+        [
+            [np.sqrt(2), 2],
+            [np.sqrt(1), 3],
+            [np.sqrt(2), 2],
+            [np.sqrt(2 / 4), 5],
+            [np.sqrt(2 / 3), 4],
+            [np.sqrt(2 / 3), 4],
+            [np.sqrt(2 / 1), 2],
+        ]
+    )
     analyst.plot_fht()
     assert np.array_equal(stabilvol.values, given_stabilvol), "Stabilvol incorrect."

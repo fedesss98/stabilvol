@@ -83,9 +83,7 @@ def list_database_thresholds(database) -> pd.DataFrame:
 
 def query_data(database, query):
     engine = create_engine(f'sqlite:///{database}')
-    df = pd.read_sql_query(query, con=engine)
-
-    return df
+    return pd.read_sql_query(query, con=engine)
 
 
 if __name__ == "__main__":

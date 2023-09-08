@@ -283,16 +283,16 @@ def get_stabilvol(data):
 def set_ref_max_volatility(market):
     data = retrieve_data('2004-01-01', market)
     _, indicators = get_stabilvol(data)
-    max_volatility = indicators['Peak'] + 4 * indicators['FWHM']
-    return max_volatility
+    return indicators['Peak'] + 4 * indicators['FWHM']
 
 
 def analyze_data(data, max_volatility=None):
     stabilvol, indicators = get_stabilvol(data)
     volatilty_cut = indicators['Peak'] + 4 * indicators['FWHM']
     max_volatility = max_volatility if max_volatility is not None else volatilty_cut
-    mfht = MeanFirstHittingTimes(stabilvol, max_volatility=max_volatility, **COMMON_MFHT_DICT)
-    return mfht
+    return MeanFirstHittingTimes(
+        stabilvol, max_volatility=max_volatility, **COMMON_MFHT_DICT
+    )
 
 
 def take_indicators(args):

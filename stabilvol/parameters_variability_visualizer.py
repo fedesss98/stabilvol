@@ -18,7 +18,7 @@ INDICATORS = [
 
 
 def print_parameters(df):
-    parameters = list()
+    parameters = []
     for level in range(df.index.nlevels):
         unique_values = df.index.get_level_values(level).unique()
         parameters.append(unique_values)

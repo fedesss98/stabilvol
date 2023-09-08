@@ -37,8 +37,7 @@ def check_inputs(criterion, threshold):
 
 
 def read_data(market):
-    df = pd.read_pickle(ROOT / f'data/raw/{market}.pickle')
-    return df
+    return pd.read_pickle(ROOT / f'data/raw/{market}.pickle')
 
 
 def sliding_counting(markets, window, end, shift='1d', **criterion):
@@ -103,7 +102,7 @@ def main(window_lengths: list,
     :param dict criterion: ['percentage' / 'startend'] criterion to use and threshold value
     :return: None
     """
-    total_stocks_count = dict()
+    total_stocks_count = {}
     windows = [Window(start=start, length=int(length)) for length in window_lengths]
     pool = mp.Pool(mp.cpu_count())
     for length in window_lengths:

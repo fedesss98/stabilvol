@@ -102,7 +102,7 @@ class App(tk.Tk):
 
     @property
     def inputs(self):
-        inputs_dict = {
+        return {
             "markets": self.marketframe.marketselection.markets,
             "start_date": self.start_date.get().split(', '),
             "duration": self.window_length.get().split(', '),
@@ -116,7 +116,6 @@ class App(tk.Tk):
             "stack": self.stack.get(),
             "save": self.save.get(),
         }
-        return inputs_dict
 
     @property
     def inputs_iterator(self):
@@ -149,13 +148,13 @@ class App(tk.Tk):
     def select_stocks(self, event=None, show=True):
         # Initialize datas
         self.datas = []
-        stocks = []
         if len(self.inputs['markets']) <= 0:
             messagebox.showerror(title="No market selected!", message="Select at least one market.")
         else:
             # Initialize DataExtractor
             self.accountant._criterion = self.inputs['criterion']
             self.accountant._value = self.inputs['criterion_value']
+            stocks = []
             for market, start_date, duration in self.inputs_iterator:
                 print(f'{market} - {start_date} - {duration}')
                 # Check if starting date and duration are set up correctly
@@ -356,7 +355,7 @@ class App(tk.Tk):
             df = self.analyst.lienarize_powerlaw(df.reset_index(3))
             g = sns.lmplot(data=df, **plot_params)
         # Draws a grid in axes
-        if sum([len(self.inputs[self.convert_col_name(v)]) for v in varaibles]) == 3:
+        if sum(len(self.inputs[self.convert_col_name(v)]) for v in varaibles) == 3:
             g.ax.grid()
         else:
             for ax in g.axes.flat:
@@ -396,8 +395,9 @@ class App(tk.Tk):
 
     def save_analysis(self):
         """ Extract FHT from calculated ones and save them to a pickle file """
-        directory = filedialog.askdirectory(title="Please select a directory to save your files")
-        if directory:
+        if directory := filedialog.askdirectory(
+            title="Please select a directory to save your files"
+        ):
             # The user did not cancel the selection
             for market, start_date, duration in self.inputs_iterator:
                 id: int = self.log_index[(market, start_date, duration)]

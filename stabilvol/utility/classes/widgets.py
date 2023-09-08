@@ -227,10 +227,7 @@ class SlideChoiceFrame(ttk.Frame):
 
     @property
     def end_date(self):
-        if self.choice == "True":
-            return self.end_string.get(1.0, 'end-1c')
-        else:
-            return None
+        return self.end_string.get(1.0, 'end-1c') if self.choice == "True" else None
 
     def manage_end_input(self):
         if self._slide_choice.get() == "True":
@@ -604,7 +601,7 @@ class StatusFrame(ttk.Frame):
 
         self.label_market = ttk.Label(self, text='Selected Market: - ', )
         self.label_stocks = ttk.Label(self, text='Stock included in period: - ', )
-        self.label_count = ttk.Label(self, text=f'FHT: Not counted', )
+        self.label_count = ttk.Label(self, text='FHT: Not counted')
         # Place Widgets
         self.label_market.grid(column=0, row=0, padx=15, pady=(10, 0), sticky=tk.W)
         self.label_stocks.grid(column=1, row=0, padx=15, pady=(10, 0), sticky=tk.W)

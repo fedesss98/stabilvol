@@ -58,7 +58,7 @@ class Window:
             try:
                 float(value)
                 # Then the string contains only numbers
-                value = str(value) + 'd'
+                value = f'{str(value)}d'
             except ValueError:
                 # Then the string contains a letter
                 value = str(value)
@@ -81,10 +81,7 @@ class Window:
         else:
             raise ValueError(f"Criterion '{method.keys()}' not known")
         self.stocks_inside = selected_stocks
-        if return_stocks:
-            return selected_stocks
-        else:
-            return len(selected_stocks)
+        return selected_stocks if return_stocks else len(selected_stocks)
 
 
     @staticmethod

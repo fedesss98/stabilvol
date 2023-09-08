@@ -41,7 +41,7 @@ class Logger:
                   **kwargs}
         for c in classes:
             try:
-                inputs.update(c.inputs)
+                inputs |= c.inputs
             except Exception as e:
                 logging.warning("Unrecognized class: ", e)
         self.inputs = inputs
@@ -97,7 +97,11 @@ class Logger:
                     # Check if logs have same parameters
                     if logs_dict[log_id].keys() == inputs.keys():
                         # Check if parameters are equal except for Date
-                        if all([logs_dict[log_id][k] == inputs[k] for k in inputs.keys() if k != 'Date']):
+                        if all(
+                            logs_dict[log_id][k] == inputs[k]
+                            for k in inputs.keys()
+                            if k != 'Date'
+                        ):
                             duplicate_log_id = log_id
         return duplicate_log_id
 

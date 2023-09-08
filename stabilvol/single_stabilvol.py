@@ -45,8 +45,7 @@ def get_stabilvol(market, accountant, analyst):
         # 'Start date': accountant.start_date.strftime("%Y-%m-%d"),
         # 'Window length': int(accountant.window.length.days / 365.2425)
     }
-    stabilvol = analyst.get_stabilvol(data, 'multi', **analysis_info)
-    return stabilvol
+    return analyst.get_stabilvol(data, 'multi', **analysis_info)
 
 
 def main():

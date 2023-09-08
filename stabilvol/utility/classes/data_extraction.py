@@ -89,16 +89,16 @@ class DataExtractor:
 
     @end_date.setter
     def end_date(self, value):
-        if value is not None:
-            if isinstance(value, (str, pd.Timestamp)):
-                self._end_date = pd.Timestamp(value)
-                # Set new duration
-                self.duration = self._end_date - self.start_date
-            else:
-                raise TypeError('Expected string or pd.Timestamp object')
-        else:
+        if value is None:
             # value is none, set it from duration
             self._end_date = self.start_date + self._duration
+
+        elif isinstance(value, (str, pd.Timestamp)):
+            self._end_date = pd.Timestamp(value)
+            # Set new duration
+            self.duration = self._end_date - self.start_date
+        else:
+            raise TypeError('Expected string or pd.Timestamp object')
 
     @property
     def duration(self):
@@ -144,7 +144,7 @@ class DataExtractor:
 
     @property
     def inputs(self) -> dict:
-        inputs_dict = {
+        return {
             'start_date': str(self.start_date),
             'end_date': str(self.end_date),
             'duration': self.duration.years,
@@ -152,7 +152,6 @@ class DataExtractor:
             'max_stddev': self.max_sigma,
             'selection_criterion': self.criterion,
         }
-        return inputs_dict
 
     @staticmethod
     def check_dates(start, end, duration):
@@ -164,7 +163,7 @@ class DataExtractor:
         elif end and not duration:
             end = pd.Timestamp(end)
             duration = end - start
-        elif end and duration:
+        elif end:
             print("Both end-date and duration specified:\nEnd-date will be used.")
             end = pd.Timestamp(end)
             duration = end - start
@@ -182,7 +181,7 @@ class DataExtractor:
             try:
                 float(value)
                 # Then the value is in the shape of a number
-                value = str(value) + "d"
+                value = f"{str(value)}d"
             except ValueError:
                 # Then the value contains a letter
                 value = str(value)
@@ -269,13 +268,11 @@ class DataExtractor:
             query = f"SELECT * FROM {table_name} WHERE start > '{self.start_date}' AND end < '{self.end_date}'"
         if market is not None:
             market_query += f"market = '{market}'"
-        df = pd.read_sql(query + market_query, con=engine)
-        return df
+        return pd.read_sql(query + market_query, con=engine)
 
     def extract_stabilvol_from_database(self, market, start_level, end_level):
         """ Read stabilvol data directly from SQL database """
-        stabilvol = self.read_sql(market, start_level, end_level)
-        return stabilvol
+        return self.read_sql(market, start_level, end_level)
 
     def plot_selection(self, edit=False):
         avg_min = self.data.min().median()

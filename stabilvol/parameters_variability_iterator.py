@@ -55,7 +55,7 @@ CRITERION_CONVERSION = {
 
 def create_index():
     index = []
-    for i, params in enumerate(product(*PARAMETERS1.values())):
+    for _ in product(*PARAMETERS1.values()):
         index = []
 
 
