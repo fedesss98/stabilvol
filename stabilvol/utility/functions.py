@@ -36,6 +36,7 @@ def list_database_tables(database):
         print(table[0])
     cursor.close()
     conn.close()
+    return tables
 
 
 def extract_t1_t2(table_name: str) -> tuple:
@@ -45,6 +46,11 @@ def extract_t1_t2(table_name: str) -> tuple:
     t1 = t1.replace('m', '-').replace('p', '.')
     t2 = t2.replace('m', '-').replace('p', '.')
     return round(float(t1), 2), round(float(t2), 2)
+
+
+def stringify_threshold(t):
+    t = str(t).replace('-', 'm').replace('.', 'p')
+    return t
 
 
 def list_database_thresholds(database) -> pd.DataFrame:
@@ -71,7 +77,7 @@ def list_database_thresholds(database) -> pd.DataFrame:
     print(f"{'Start Threshold':^16}\t{'End Thresholds':^25}")
     for t1, t2_group in thresholds.groupby('Start'):
         print(f"{' '*5}{t1:>6}{' '*5}", end='\t')
-        for t2 in t2_group['End']:
+        for t2 in t2_group['End'].sort_values():
             print(f"{t2:>6}", end=' ')
         print()
 
