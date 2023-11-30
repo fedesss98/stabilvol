@@ -37,7 +37,7 @@ VALUE = 0.05
 START_LEVELS = [0.1, 0.2, 0.5, 1.0, 2.0]
 DELTAS = [0.1, 0.2, 0.5, 1.0, 2.0]
 LEVELS = {
-    (start, start+delta) for start in START_LEVELS for delta in DELTAS
+    (round(start, 2), round(start+delta, 2)) for start in START_LEVELS for delta in DELTAS
 }
 TAU_MAX = 1000000
 
