@@ -2,8 +2,7 @@
 data/
 static/
 
-# Ignore ipybb checkpoints
-notebooks/
+# Ignore ipynb checkpoints
 *.ipynb
 
 # Images and plots
