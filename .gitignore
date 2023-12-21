@@ -3,7 +3,6 @@ data/
 static/
 
 # Ignore ipynb checkpoints
-*.ipynb
 
 # Images and plots
 visualization/
