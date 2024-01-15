@@ -53,6 +53,11 @@ def stringify_threshold(t):
     return t
 
 
+def numerify_threshold(t):
+    t = t.replace('m', '-').replace('p', '.')
+    return t
+
+
 def list_database_thresholds(database) -> pd.DataFrame:
     # Connect to the SQLite database
     conn = sqlite3.connect(database)

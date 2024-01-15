@@ -34,8 +34,8 @@ END_DATE = '2022-07-01'
 CRITERION = 'percentage'
 VALUE = 0.05
 
-START_LEVELS = [0.1, 0.2, 0.5, 1.0, 2.0]
-DELTAS = [0.1, 0.2, 0.5, 1.0, 2.0]
+START_LEVELS = [2.0, 1.0, 0.5, 0.2, 0.1]
+DELTAS = [2.0, 1.0, 0.5, 0.2, 0.1]
 LEVELS = {
     (round(start, 2), round(start+delta, 2)) for start in START_LEVELS for delta in DELTAS
 }
@@ -62,6 +62,9 @@ def main():
         criterion_value=VALUE,
         sigma_range=(1e-5, 1e5)
     )
+    # Make global variables local
+    levels = LEVELS
+    markets = MARKETS
     print(LEVELS)
     """
     {(-0.2, 0.0), (-0.5, 0.0), (-0.5, 0.5), (-0.1, 1.9), (-1.0, -0.8), 
@@ -81,28 +84,29 @@ def main():
     selection_type = 'trapezoidal_selection' if CRITERION == 'percentage' else 'rectangular_selection'
     database_dir = ROOT / f'data/processed/{selection_type}/stabilvol.sqlite'
     saved_levels = list_database_thresholds(database_dir).values.tolist()
-    for start_level, end_level in LEVELS:
+    for i, (start_level, end_level) in enumerate(levels):
         if [start_level, end_level] in saved_levels:
             print(f"Skipping {start_level, end_level}...")
             continue
+        print(f"- {i/len(levels)}% ({start_level, end_level}) ")
         stabilvols = []
         analyst = StabilVolter(
             start_level=start_level,
             end_level=end_level,
             tau_max=TAU_MAX)
 
-        for market in MARKETS:
-            print(f"\n{'-'*25}\nCounting {market} stabilvol with thresholds {start_level, end_level}...")
+        for market in markets:
+            #print(f"\n{'-'*25}\nCounting {market} stabilvol with thresholds {start_level, end_level}...")
             # GET STABILVOL
-            start_time = datetime.now()
+            #start_time = datetime.now()
             stabilvol = get_stabilvol(market, accountant, analyst)
-            end_time = datetime.now()
-            print(f"Stabilvol calculated in {end_time - start_time} seconds\n")
+            #end_time = datetime.now()
+            #print(f"Stabilvol calculated in {end_time - start_time} seconds\n")
 
             # STATISTICS
-            print_indicators_table('FHT Indicators'.upper(), analyst.get_indicators(stabilvol))
-            analyst.plot_fht(title=f"{market} FHT")
-            plt.show()
+            # print_indicators_table('FHT Indicators'.upper(), analyst.get_indicators(stabilvol))
+            # analyst.plot_fht(title=f"{market} FHT")
+            # plt.show()
 
             stabilvols.append(stabilvol)
 

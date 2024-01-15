@@ -22,16 +22,16 @@ import matplotlib.pyplot as plt
 import sqlite3
 from sqlalchemy import create_engine
 
-MARKETS = ['UN', 'UW', 'LN', 'JT']
+MARKETS = ['UN']
 START_DATE = '1980-01-01'
 END_DATE = '2022-07-01'
 CRITERION = 'percentage'
 VALUE = 0.05
 
-START_LEVEL = 0.1
+START_LEVEL = 2.0
 START_LEVELS = [0.1, 0.2, 0.5, 1.0, 2.0]
 DELTAS = [0.1, 0.2, 0.5, 1.0, 2.0]
-END_LEVEL = 50.0
+END_LEVEL = 0.1
 LEVELS = {
     (start, start+delta) for start in START_LEVELS for delta in DELTAS
 }
@@ -83,7 +83,7 @@ def main():
         stabilvols.append(stabilvol)
 
     stabilvols = pd.concat(stabilvols, axis=0)
-    save_to_database(stabilvols)
+    #save_to_database(stabilvols)
     return stabilvols
 
 
