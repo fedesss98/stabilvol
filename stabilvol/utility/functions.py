@@ -3,10 +3,18 @@ Created on 2022 - 11 - 10
 
 Utility functions
 """
+import numpy as np
 import sqlite3
 import pandas as pd
+import matplotlib.pyplot as plt
+from matplotlib import colors
+
 from sqlalchemy import create_engine
-import re
+from tqdm import tqdm
+
+STARTING_BINS = 200
+VOL_LIMIT = 0.5
+DATABASE = '../data/processed/trapezoidal_selection/stabilvol.sqlite'
 
 
 def check_input_market(market):
@@ -94,9 +102,170 @@ def list_database_thresholds(database) -> pd.DataFrame:
 
 def query_data(database, query):
     engine = create_engine(f'sqlite:///{database}')
-    df = pd.read_sql_query(query, con=engine)
+    return pd.read_sql_query(query, con=engine)
 
-    return df
+
+def select_bins(df, max_n=1000, min_n = STARTING_BINS):
+    """
+    Bin FHT to make MFHT.
+    Bins are chosen dynamically to have at most max_n observations in each bin and at most 1000 bins.
+    If in each bin there are more than max_n observations, the number of bins is increased by 100.
+    """
+    nbins = min_n
+
+    while True:
+        # Use qcut to bin 'Volatility' values
+        df['Bins'] = pd.qcut(df['Volatility'], nbins, duplicates='drop')
+
+        # Group by the bins and calculate the mean and standard error of 'value' and the number of observations in each bin
+        grouped = df.groupby('Bins')['FHT'].agg(['mean', 'size'])
+        # Take the lowest count of observations in the bins
+        count = grouped['size'].min()
+
+        if count < max_n or nbins > 1000:
+            break
+        else:
+            nbins += 100
+    return grouped, nbins
+
+
+def error_on_the_mean(values):
+    return np.std(values) / np.sqrt(len(values))
+
+
+def query_binned_data(market: str, start_date:str, end_date:str = None, vol_limit:float = 0.5, t1_string:str = "m0p5", t2_string:str = "m1p5", conn=None):
+    grouped_data = None
+    conn = sqlite3.connect(DATABASE) if conn is None else conn
+    end_date = '2023-01-01' if end_date is None else end_date
+    try:            
+        # Write the SQL query
+        query = f'''
+        SELECT *
+        FROM stabilvol_{t1_string}_{t2_string}
+        WHERE Volatility < {vol_limit} 
+        AND Market = "{market}"
+        AND start >= "{start_date}"
+        AND end <= "{end_date}"    
+        '''
+        # Load the FHT data from the database
+        df = pd.read_sql_query(query, conn)
+    except pd.errors.DatabaseError:
+        print(f'No data for market {market} with thresholds {t1_string}-{t2_string}')
+        nbins = 0
+    else:
+        if len(df) > 50:
+            return select_bins(df)
+        else:
+            raise ValueError(f'Not enough data for market {market} with thresholds {t1_string}-{t2_string} from {start_date} to {end_date}')
+
+
+def create_dataset(markets, windows, t1_string, t2_string, vol_limit=VOL_LIMIT):
+    outcasts = {market: [] for market in markets}
+    df_list = []
+    # Connect to the SQLite database
+    conn = sqlite3.connect(DATABASE)
+    for market in markets:
+        for start_date, end_date in tqdm(windows, desc=market):
+            try:
+                mfht, nbins = query_binned_data(
+                    market, start_date, end_date, vol_limit, t1_string=t1_string, t2_string=t2_string, conn=conn)
+            except ValueError:
+                outcasts[market].append((start_date, end_date))
+            else:
+                mfht['start'] = start_date
+                mfht['end'] = end_date
+                mfht['market'] = market
+                df_list.append(mfht.reset_index())
+
+    return pd.concat(df_list), outcasts
+
+
+def _add_ticks(ax, windows, coeff, outcasts, highlights=True, **kwargs):
+    ax.set_title(
+        ' '.join([r'$\theta_i$=', f.numerify_threshold(coeff[0]), r'/ $\theta_f$=', f.numerify_threshold(coeff[1])]),
+        fontsize=12)
+    # Remove yticks
+    ax.yaxis.set_ticks([])
+
+    # Set the xticks to be the start date of each window
+    label_spacing = kwargs.get('label_spacing', 1)
+    labels = [win[0].strftime('%Y-%b') for win in windows][::label_spacing]
+    l = 1
+    # Add the last date
+    labels.append(windows[-1][1].strftime('%Y-%b'))
+    if len(labels) != len(np.arange(0, len(windows) + l, label_spacing)):
+        # Add last window end
+        l += label_spacing
+    ax.set_xticks(np.arange(0, len(windows) + l, label_spacing))
+    ax.set_xticklabels(labels, rotation=90, va='bottom', fontsize=11, y=-0.9)
+    ax.tick_params(axis='x', colors='black', direction='out', length=6, width=2)
+
+    label_dates = [start_date for start_date, end_date in windows]
+    label_dates.append(windows[-1][1])
+    label_dates = pd.to_datetime(label_dates)
+    outcast_dates = [(pd.to_datetime(start), pd.to_datetime(end)) for start, end in outcasts]
+    for outcast in outcast_dates:
+        # Find the indices of the start and end labels
+        try:
+            start_index = np.where(label_dates <= outcast[0])
+            # Since only the end date is labeled, if the first start date is an outcast, it must be set manually
+            start_index = start_index[0][-1] if len(start_index[0]) > 0 else 0
+            end_index = np.where(label_dates >= outcast[1])[0][0]
+        except IndexError as e:
+            print(f'Cannot find end index for date {outcast[1]}')
+        else:
+            ax.axvspan(start_index, end_index, color='black')
+
+    if highlights:
+        try:
+            # Find the indices of the start and end labels
+            start_index = np.where(label_dates < pd.to_datetime('2006-12-31'))[0][-1]
+            end_index = np.where(label_dates > pd.to_datetime('2008-12-31'))[0][0]
+        except IndexError as e:
+            print('Cannot highlight crisis: ', e)
+        else:
+            # Add vertical lines at the start and end of the region
+            ax.axvline(start_index, color='k', linestyle='--', linewidth=1.5)
+            ax.axvline(end_index, color='k', linestyle='--', linewidth=1.5)
+
+
+def plot_rolling_pmesh(coefficients, windows, values, **kwargs):
+    outcasts = {(t1, t2): [] for t1, t2 in coefficients}
+
+    if kwargs.get('latex', False):
+        # Use LaTeX for text rendering
+        plt.rcParams['text.usetex'] = True
+        plt.rcParams['font.family'] = 'serif'
+
+    fig, axs = plt.subplots(len(coefficients), figsize=(12, 2.5), sharex=True, layout='constrained')
+    flattened_axs = axs.flatten() if len(coefficients) > 1 else [axs]
+    if kwargs.get('suptitle', False):
+        fig.suptitle(kwargs.get('suptitle'), fontsize=16)
+
+    # Search for outcasts
+    for i, (coeff, ax) in enumerate(zip(coefficients, flattened_axs)):
+        for j, (start_date, end_date) in enumerate(windows):
+            # See where the max is zero and label it as outcast
+            if values[i, j] < 0:
+                outcasts[coeff].append((start_date, end_date))
+        print(f"Outcasts for {coeff}: {len(outcasts[coeff])}")
+
+        # Create a TwoSlopeNorm
+        norm = colors.TwoSlopeNorm(vmin=0, vcenter=0.05, vmax=1)
+        pmesh = ax.pcolormesh(values[i].reshape(1, -1),
+                              cmap='coolwarm', norm=norm,
+                              edgecolors='w', linewidth=kwargs.get('linewidth', 0)
+                              )
+        # Add ticks to the plot
+        _add_ticks(ax, windows, coeff, outcasts[coeff], **kwargs)
+        # Set the colorbar for each plot showing only maximum and minimum values
+    cbar = fig.colorbar(pmesh, ax=axs, orientation='vertical', pad=0.01, ticks=[0, 0.05, 1], aspect=10)
+    # cbar.set_ticks([0.0, values[i].mean(), values[i].max()])
+    cbar.ax.set_yticklabels([0, 'Accept\n' + r'$\big\uparrow$' + '\nThreshold\n' + r'$\big\downarrow$' + '\nReject', 1],
+                            fontsize=11)
+
+    plt.show()
+    return fig, outcasts
 
 
 if __name__ == "__main__":
