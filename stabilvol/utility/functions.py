@@ -9,7 +9,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib import colors
 
-from sqlalchemy import create_engine
+# from sqlalchemy import create_engine
 from tqdm import tqdm
 
 STARTING_BINS = 200
@@ -182,7 +182,7 @@ def create_dataset(markets, windows, t1_string, t2_string, vol_limit=VOL_LIMIT):
 
 def _add_ticks(ax, windows, coeff, outcasts, highlights=True, **kwargs):
     ax.set_title(
-        ' '.join([r'$\theta_i$=', f.numerify_threshold(coeff[0]), r'/ $\theta_f$=', f.numerify_threshold(coeff[1])]),
+        ' '.join([r'$\theta_i$=', numerify_threshold(coeff[0]), r'/ $\theta_f$=', numerify_threshold(coeff[1])]),
         fontsize=12)
     # Remove yticks
     ax.yaxis.set_ticks([])

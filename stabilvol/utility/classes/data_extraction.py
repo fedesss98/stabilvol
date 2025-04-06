@@ -12,8 +12,11 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from pandas.tseries.offsets import DateOffset
 from pathlib import Path
-import seaborn as sns
-from sqlalchemy import create_engine
+# import seaborn as sns
+try:
+    from sqlalchemy import create_engine
+except ModuleNotFoundError:
+    print("Module 'sqalchemy' not found, unable to save data to sql database.")
 
 try:
     from stabilvol.utility.classes.data_inspection import Window
@@ -32,7 +35,7 @@ class DataExtractor:
             duration: int = None,
             sigma_range: tuple = (0.001, 1000),
             criterion: str = 'startend',
-            criterion_value: str | int | float = '6d',
+            criterion_value = '6d',
     ):
         """
         Initialize Data Extractor.
@@ -171,7 +174,7 @@ class DataExtractor:
         return start, end, duration
 
     @staticmethod
-    def __check_criterion(criterion: str, value: float | str) -> (str, str | float | int):
+    def __check_criterion(criterion: str, value: float | str) -> tuple[str, float]:
         if criterion == 'percentage':
             try:
                 value = float(value)
