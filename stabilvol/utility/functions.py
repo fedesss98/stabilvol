@@ -57,6 +57,7 @@ def extract_t1_t2(table_name: str) -> tuple:
 
 
 def stringify_threshold(t):
+    t = round(float(t), 2)
     t = str(t).replace('-', 'm').replace('.', 'p')
     return t
 
