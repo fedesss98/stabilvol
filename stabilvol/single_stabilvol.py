@@ -17,7 +17,7 @@ VALUE = 0.05
 
 START_LEVEL = -0.1
 END_LEVEL = -1.5
-TAU_MAX = 1e6
+TAU_MAX = 30
 NBINS = 2000
 
 
@@ -37,7 +37,7 @@ def print_indicators_table(header, indicators):
     print(f"{'-' * table_width}")
 
 
-def get_stabilvol(market, accountant, analyst):
+def get_stabilvol(market, accountant, analyst, method='multi'):
     data = accountant.extract_data(DATABASE / f'{market}.pickle')
 
     analysis_info = {
@@ -45,7 +45,7 @@ def get_stabilvol(market, accountant, analyst):
         # 'Start date': accountant.start_date.strftime("%Y-%m-%d"),
         # 'Window length': int(accountant.window.length.days / 365.2425)
     }
-    stabilvol = analyst.get_stabilvol(data, 'multi', **analysis_info)
+    stabilvol = analyst.get_stabilvol(data, method, **analysis_info)
     return stabilvol
 
 
