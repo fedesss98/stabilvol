@@ -7,7 +7,7 @@ from utility.classes.stability_analysis import StabilVolter, MeanFirstHittingTim
 import matplotlib.pyplot as plt
 from pathlib import Path
 
-DATABASE = Path('../data/interim')
+DATABASE = Path('data/interim')
 
 MARKET = 'UN'
 START_DATE = '2020-01-01'
