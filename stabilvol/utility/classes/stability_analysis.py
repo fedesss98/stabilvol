@@ -13,6 +13,71 @@ from pathlib import Path
 import logging
 
 
+def count_stock_fht(
+        series, start_level, end_level, divergence_limit, tau_min, tau_max, squeeze=False
+):
+    """
+    Count First Hitting Times of one stock returns series.
+
+    :param pd.Series series:
+    :param float threshold_start:
+    :param float threshold_end:
+    :param float divergence_limit:
+    :return:
+    """
+    # Make series continuous
+    if isinstance(series, pd.Series):
+        series = series.dropna()
+    elif isinstance(series, np.ndarray):
+        series = series[~np.isnan(series)]
+    else:
+        raise ValueError("Strange series")
+    if end_level > start_level:
+        # Reverse series
+        start_level, end_level, series = -end_level, -start_level, -series
+    counting = False
+    counting_time = 0
+    fht = []
+    volatility = []
+    starts = []
+    ends = []
+    start_t = 0
+    start_counting_date = pd.Timestamp('1980-01-01')
+    # Ignore datetime indexes for iteration, use only integers
+    for t, (date, level) in enumerate(series.items()):
+        if not counting and level > start_level:
+            # Start counting
+            counting = True
+            start_t = t
+            start_counting_date = date
+        if counting and (abs(level) > divergence_limit and counting_time < tau_max):
+            # Stop counting and pass on
+            counting = False
+        if counting and level < end_level:
+            # Stop counting and take FHT
+            counting = False
+            end_t = t
+            end_counting_date = date
+            counting_time = end_t - start_t
+            if tau_min <= counting_time <= tau_max:
+                # Append FHT and Volatility
+                local_volatility = series[start_t: end_t].std(ddof=1)
+                fht.append(counting_time)
+                volatility.append(local_volatility)
+                starts.append(start_counting_date.strftime('%Y-%m-%d'))
+                ends.append(end_counting_date.strftime('%Y-%m-%d'))
+    # Gather data in a DataFrame
+    stock_stabilvol = np.array([volatility, fht, starts, ends])
+    if squeeze:
+        stock_stabilvol = stock_stabilvol.flatten()
+    return stock_stabilvol
+
+
+def _process_series_for_multiprocessing(args):
+    # Unpack the arguments and call the counting function
+    return count_stock_fht(*args)
+
+
 class StabilVolter:
     def __init__(
             self,
@@ -141,6 +206,7 @@ class StabilVolter:
             # Reverse series
             start_level, end_level, series = -end_level, -start_level, -series
         counting = False
+        counting_time = 0
         fht = []
         volatility = []
         starts = []
@@ -149,12 +215,12 @@ class StabilVolter:
         start_counting_date = pd.Timestamp('1980-01-01')
         # Ignore datetime indexes for iteration, use only integers
         for t, (date, level) in enumerate(series.items()):
-            if not counting and level > start_level and abs(level) < divergence_limit:
+            if not counting and level > start_level:
                 # Start counting
                 counting = True
                 start_t = t
                 start_counting_date = date
-            if counting and abs(level) < divergence_limit:
+            if counting and (abs(level) > divergence_limit and counting_time < self.tau_max):
                 # Stop counting and pass on
                 counting = False
             if counting and level < end_level:
@@ -168,8 +234,8 @@ class StabilVolter:
                     local_volatility = series[start_t: end_t].std(ddof=1)
                     fht.append(counting_time)
                     volatility.append(local_volatility)
-                    starts.append(start_counting_date)
-                    ends.append(end_counting_date)
+                    starts.append(start_counting_date.strftime('%Y-%m-%d'))
+                    ends.append(end_counting_date.strftime('%Y-%m-%d'))
         # Gather data in a DataFrame
         stock_stabilvol = np.array([volatility, fht, starts, ends])
         if squeeze:
@@ -203,11 +269,25 @@ class StabilVolter:
             self.stabilvol = pd.DataFrame(np.concatenate(result_matrix, axis=1).T, columns=['Volatility', 'FHT'])
         elif method == 'multi':
             # Multiprocessing method (faster)
-            pool = mp.Pool(processes=mp.cpu_count() - 1)
-            result = pool.map(self.count_stock_fht, [self.data[col] for col in self.data.columns])
-            pool.close()
+            # Uses the count_stock_fht function defined outside the class 
+            args_list = []
+            for col in self.data.columns:
+                args_list.append((
+                    self.data[col],
+                    self.threshold_start,
+                    self.threshold_end,
+                    self.divergence_limit,
+                    self.tau_min,
+                    self.tau_max
+                ))
+            
+            # Create process pool with fewer workers to reduce memory pressure
+            with mp.Pool(processes=max(1, mp.cpu_count() - 4)) as pool:
+                result = pool.map(_process_series_for_multiprocessing, args_list)
+
             if sum(a.size for a in result) == 0:
                 raise ValueError("No results for this choise of parameters.")
+
             self.stabilvol = self.__format_results(result)
         else:
             # Numpy method
@@ -368,6 +448,25 @@ class StabilVolter:
         if not edit:
             plt.show()
         return ax
+    
+    def plot_thresholds(self, stock=None, x_range=None, y_range=None):
+        fig, ax = plt.subplots(figsize=(10, 4))
+    
+        if stock is not None:
+            series = self.data[stock].dropna()
+            x_range = (series.index[0], series.index[-1]) if x_range is None else x_range
+            ax.plot(series.loc[slice(x_range[0], x_range[-1])], label=stock)
+        else:
+            x_range = (0, 1)
+        ax.fill_between(x_range, self.threshold_start, self.threshold_end, color='aquamarine', alpha=0.2)
+        ax.axhline(self.threshold_start, 0, 1, c='green', label='$\\theta_i\\hat{\\sigma}$')
+        ax.axhline(self.threshold_end, 0, 1, c='red', label='$\\theta_f\\hat{\\sigma}$')
+        if y_range:
+            ax.set_ylim(*y_range)
+        else:
+            ax.set_ylim(-1, 1)
+        plt.show()
+        return None
 
     @staticmethod
     def get_indicators(stabilvol: pd.DataFrame):
