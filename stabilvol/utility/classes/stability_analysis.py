@@ -7,7 +7,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import multiprocessing as mp
 import numpy as np
-# import seaborn as sns
+import seaborn as sns
 
 from pathlib import Path
 import logging
@@ -197,6 +197,8 @@ class StabilVolter:
         self.data = data if data is not None else self.data
         if method == 'pandas':
             result = self.data.apply(self.count_stock_fht, squeeze=True)
+            if result.empty:
+                raise ValueError("No results for this choise of parameters.")
             result_matrix = [series.reshape(2, -1) for series in result]
             self.stabilvol = pd.DataFrame(np.concatenate(result_matrix, axis=1).T, columns=['Volatility', 'FHT'])
         elif method == 'multi':
@@ -204,6 +206,8 @@ class StabilVolter:
             pool = mp.Pool(processes=mp.cpu_count() - 1)
             result = pool.map(self.count_stock_fht, [self.data[col] for col in self.data.columns])
             pool.close()
+            if sum(a.size for a in result) == 0:
+                raise ValueError("No results for this choise of parameters.")
             self.stabilvol = self.__format_results(result)
         else:
             # Numpy method
