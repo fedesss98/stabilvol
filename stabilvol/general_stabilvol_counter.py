@@ -15,23 +15,25 @@ start date or ends before the end date.
 from utility.definitions import ROOT
 from utility.classes.data_extraction import DataExtractor
 from utility.classes.stability_analysis import StabilVolter
-from single_stabilvol import print_indicators_table, get_stabilvol
+from single_stabilvol import print_indicators_table
 
+import argparse
 import pandas as pd
 import matplotlib.pyplot as plt
 import sqlite3
 from sqlalchemy import create_engine
 
-MARKETS = ['UN']
+MARKETS = ['UN_little']
 START_DATE = '1980-01-01'
 END_DATE = '2022-07-01'
 CRITERION = 'percentage'
 VALUE = 0.05
+COUNTING_METHOD = 'multi'  # This uses multiprocessing
 
-START_LEVEL = 2.0
+START_LEVEL = -2.0
 START_LEVELS = [0.1, 0.2, 0.5, 1.0, 2.0]
 DELTAS = [0.1, 0.2, 0.5, 1.0, 2.0]
-END_LEVEL = 0.1
+END_LEVEL = 0.0
 LEVELS = {
     (start, start+delta) for start in START_LEVELS for delta in DELTAS
 }
@@ -71,7 +73,10 @@ def main():
         print(f"\n{'-'*25}\nCounting {market} stabilvol...")
         # GET STABILVOL
         start_time = datetime.now()
-        stabilvol = get_stabilvol(market, accountant, analyst)
+        data = accountant.extract_data(DATABASE / f'{market}.pickle')
+
+        analysis_info = {'Market': market}  # Info column to add to result DataFrame
+        stabilvol = analyst.get_stabilvol(data, method=COUNTING_METHOD, **analysis_info)
         end_time = datetime.now()
         print(f"Stabilvol calculated in {end_time - start_time} seconds\n")
 
