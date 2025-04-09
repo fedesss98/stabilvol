@@ -31,13 +31,17 @@ VALUE = 0.05
 COUNTING_METHOD = 'multi'  # This uses multiprocessing
 
 START_LEVEL = -2.0
+END_LEVEL = -1.0
+
+PLOT_FHT = False
+
 START_LEVELS = [0.1, 0.2, 0.5, 1.0, 2.0]
 DELTAS = [0.1, 0.2, 0.5, 1.0, 2.0]
 END_LEVEL = 0.0
 LEVELS = {
     (start, start+delta) for start in START_LEVELS for delta in DELTAS
 }
-TAU_MAX = 1000000
+TAU_MAX = 100
 
 DATABASE = ROOT / 'data/interim'
 
@@ -100,19 +104,30 @@ def main():
         data = accountant.extract_data(DATABASE / f'{market}.pickle')
 
         analysis_info = {'Market': market}  # Info column to add to result DataFrame
-        stabilvol = analyst.get_stabilvol(data, method=COUNTING_METHOD, **analysis_info)
-        end_time = datetime.now()
-        print(f"Stabilvol calculated in {end_time - start_time} seconds\n")
+        try:
+            stabilvol = analyst.get_stabilvol(data, method=COUNTING_METHOD, **analysis_info)
+        except ValueError as e:
+            print(f"Error in counting stabilvol: {e}")
+            analyst.data = None
+            stabilvol = pd.DataFrame()
+        else:
+            stabilvols.append(stabilvol)
+            # STATISTICS
+            print_indicators_table('FHT Indicators'.upper(), analyst.get_indicators(stabilvol))
+            if PLOT_FHT:
+                analyst.plot_fht(title=f"{market} FHT")
+                plt.show()
 
-        # STATISTICS
-        print_indicators_table('FHT Indicators'.upper(), analyst.get_indicators(stabilvol))
-        analyst.plot_fht(title=f"{market} FHT")
-        plt.show()
+        finally:
+            end_time = datetime.now()
+            print(f"Stabilvol calculated in {end_time - start_time} seconds\n")
 
-        stabilvols.append(stabilvol)
+    if len(stabilvols):
+        stabilvols = pd.concat(stabilvols, axis=0)
+        save_to_database(stabilvols)
+    else:
+        print("No Stabilvols calculated.")
 
-    stabilvols = pd.concat(stabilvols, axis=0)
-    #save_to_database(stabilvols)
     return stabilvols
 
 
@@ -120,6 +135,9 @@ if __name__ == '__main__':
     from datetime import datetime
 
     start_time = datetime.now()
-    main()
+    try:
+        main()
+    except Exception as e:
+        print(f"Error while processing: {e}")
     end_time = datetime.now()
     print(f"\n{'_'*20}\nTotal Elapsed time: {end_time - start_time} seconds\n\n")
