@@ -21,7 +21,9 @@ import argparse
 import pandas as pd
 import matplotlib.pyplot as plt
 import sqlite3
-from sqlalchemy import create_engine
+import os
+import requests
+from sqlalchemy import create_engine, except_
 
 MARKETS = ['UN_little']
 START_DATE = '1980-01-01'
@@ -29,7 +31,6 @@ END_DATE = '2022-07-01'
 CRITERION = 'percentage'
 VALUE = 0.05
 COUNTING_METHOD = 'multi'  # This uses multiprocessing
-
 START_LEVEL = -2.0
 END_LEVEL = -1.0
 
@@ -37,7 +38,6 @@ PLOT_FHT = False
 
 START_LEVELS = [0.1, 0.2, 0.5, 1.0, 2.0]
 DELTAS = [0.1, 0.2, 0.5, 1.0, 2.0]
-END_LEVEL = 0.0
 LEVELS = {
     (start, start+delta) for start in START_LEVELS for delta in DELTAS
 }
@@ -131,6 +131,28 @@ def main():
     return stabilvols
 
 
+def send_notification(start, end):
+    token = os.getenv('PYTHONNOTIFIER_TOKEN')
+    account_id = os.getenv('TELEGRAM_ID')
+    if token is None or account_id is None:
+        print("\nUnable to send notification, I lack env variables.")
+        return None
+    
+    url = f"https://api.telegram.org/bot{token}"
+    message = f"""Your code finished running! 
+    It started at {start} and ended at {end}, taking {end-start} seconds"""
+    params = {
+        "chat_id": account_id, 
+        "text": message}
+    try:
+        r = requests.get(url + '/sendMessage', params=params)
+    except Exception as e:
+        print(f"Unable to send notification: {e}")
+    else:
+        print(f"Request sent with status code: {r.status_code}")
+    return None
+
+
 if __name__ == '__main__':
     from datetime import datetime
 
@@ -141,3 +163,6 @@ if __name__ == '__main__':
         print(f"Error while processing: {e}")
     end_time = datetime.now()
     print(f"\n{'_'*20}\nTotal Elapsed time: {end_time - start_time} seconds\n\n")
+    send_notification(start_time, end_time)
+
+
