@@ -42,6 +42,27 @@ TAU_MAX = 1000000
 DATABASE = ROOT / 'data/interim'
 
 
+def parse_arguments():
+    # Set up argument parser
+    parser = argparse.ArgumentParser(description='Stabilizing Volatility Analysis')
+    
+    # Add arguments
+    parser.add_argument('-m', '--markets', type=str, nargs='+', default=None, help='Markets to analyze')
+    parser.add_argument('--method', type=str, default='multi', choices=['pandas', 'multi', 'numpy'], 
+                        help='Method to use for calculation (default: multi)')
+    parser.add_argument('--threshold-start', type=float, default=START_LEVEL, 
+                        help='Starting threshold value')
+    parser.add_argument('--threshold-end', type=float, default=END_LEVEL, 
+                        help='Ending threshold value')
+    parser.add_argument('--tau-min', type=int, default=2, 
+                        help='Minimum tau value (default: 2)')
+    parser.add_argument('--tau-max', type=int, default=TAU_MAX, 
+                        help='Maximum tau value')
+    
+    # Parse arguments
+    return parser.parse_args()
+
+
 def save_to_database(stabilvol: pd.DataFrame):
     selection_type = 'trapezoidal_selection' if CRITERION == 'percentage' else 'rectangular_selection'
     database_dir = ROOT / f'data/processed/{selection_type}/stabilvol.sqlite'
@@ -55,6 +76,7 @@ def save_to_database(stabilvol: pd.DataFrame):
 
 
 def main():
+    args = parse_arguments()
     stabilvols = []
 
     accountant = DataExtractor(
@@ -65,12 +87,14 @@ def main():
         sigma_range=(1e-5, 1e5)
     )
     analyst = StabilVolter(
-        start_level=START_LEVEL,
-        end_level=END_LEVEL,
-        tau_max=TAU_MAX)
+        start_level=args.threshold_start,
+        end_level=args.threshold_end,
+        tau_max=args.tau_max,
+        tau_min=args.tau_min)
 
-    for market in MARKETS:
-        print(f"\n{'-'*25}\nCounting {market} stabilvol...")
+    markets = MARKETS if args.markets is None else args.markets
+    for market in markets:
+        print(f"\n{'-'*25}\nCounting {market} stabilvol starting at {datetime.now()}...")
         # GET STABILVOL
         start_time = datetime.now()
         data = accountant.extract_data(DATABASE / f'{market}.pickle')
