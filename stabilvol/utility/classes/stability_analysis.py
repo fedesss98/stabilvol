@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 import multiprocessing as mp
 import numpy as np
 import seaborn as sns
+from tqdm import tqdm
 
 from pathlib import Path
 import logging
@@ -50,7 +51,7 @@ def count_stock_fht(
             counting = True
             start_t = t
             start_counting_date = date
-        if counting and (abs(level) > divergence_limit and counting_time < tau_max):
+        if abs(level) > divergence_limit and counting_time < tau_max:
             # Stop counting and pass on
             counting = False
         if counting and level < end_level:
@@ -262,11 +263,12 @@ class StabilVolter:
         logging.info("Starting FHT counting.")
         self.data = data if data is not None else self.data
         if method == 'pandas':
-            result = self.data.apply(self.count_stock_fht, squeeze=True)
+            tqdm.pandas()
+            result = self.data.progress_apply(self.count_stock_fht, squeeze=True)
             if result.empty:
                 raise ValueError("No results for this choise of parameters.")
-            result_matrix = [series.reshape(2, -1) for series in result]
-            self.stabilvol = pd.DataFrame(np.concatenate(result_matrix, axis=1).T, columns=['Volatility', 'FHT'])
+            result_matrix = [series.reshape(4, -1) for series in result]
+            self.stabilvol = pd.DataFrame(np.concatenate(result_matrix, axis=1).T, columns=['Volatility', 'FHT', 'start', 'end'])
         elif method == 'multi':
             # Multiprocessing method (faster)
             # Uses the count_stock_fht function defined outside the class 
@@ -282,7 +284,7 @@ class StabilVolter:
                 ))
             
             # Create process pool with fewer workers to reduce memory pressure
-            with mp.Pool(processes=max(1, mp.cpu_count() - 4)) as pool:
+            with mp.Pool(processes=10) as pool:
                 result = pool.map(_process_series_for_multiprocessing, args_list)
 
             if sum(a.size for a in result) == 0:
@@ -449,8 +451,9 @@ class StabilVolter:
             plt.show()
         return ax
     
-    def plot_thresholds(self, stock=None, x_range=None, y_range=None):
-        fig, ax = plt.subplots(figsize=(10, 4))
+    def plot_thresholds(self, stock=None, x_range=None, y_range=None, ax=None):
+        if ax is None:
+            fig, ax = plt.subplots(figsize=(10, 4))
     
         if stock is not None:
             series = self.data[stock].dropna()
@@ -465,8 +468,11 @@ class StabilVolter:
             ax.set_ylim(*y_range)
         else:
             ax.set_ylim(-1, 1)
-        plt.show()
-        return None
+        
+        if ax is None:
+            plt.show()
+        else:
+            return ax
 
     @staticmethod
     def get_indicators(stabilvol: pd.DataFrame):
