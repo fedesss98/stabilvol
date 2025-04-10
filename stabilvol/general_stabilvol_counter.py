@@ -24,6 +24,7 @@ import sqlite3
 import os
 import requests
 from sqlalchemy import create_engine, except_
+import datetime
 
 MARKETS = ['UN']
 START_DATE = '1980-01-01'
@@ -157,8 +158,6 @@ def send_notification(start, end, error=None):
 
 
 if __name__ == '__main__':
-    from datetime import datetime
-
     start_time = datetime.now()
     try:
         main()
