@@ -52,7 +52,7 @@ def parse_arguments():
     
     # Add arguments
     parser.add_argument('-m', '--markets', type=str, nargs='+', default=None, help='Markets to analyze')
-    parser.add_argument('--method', type=str, default='multi', choices=['pandas', 'multi', 'numpy'], 
+    parser.add_argument('--method', type=str, default=COUNTING_METHOD, choices=['pandas', 'multi', 'numpy'], 
                         help='Method to use for calculation (default: multi)')
     parser.add_argument('--threshold-start', type=float, default=START_LEVEL, 
                         help='Starting threshold value')
@@ -105,7 +105,7 @@ def main():
 
         analysis_info = {'Market': market}  # Info column to add to result DataFrame
         try:
-            stabilvol = analyst.get_stabilvol(data, method=COUNTING_METHOD, **analysis_info)
+            stabilvol = analyst.get_stabilvol(data, method=args.method, **analysis_info)
         except ValueError as e:
             print(f"Error in counting stabilvol: {e}")
             analyst.data = None
