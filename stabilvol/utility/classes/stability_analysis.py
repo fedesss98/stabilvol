@@ -10,8 +10,30 @@ import numpy as np
 import seaborn as sns
 from tqdm import tqdm
 
+
 from pathlib import Path
 import logging
+
+
+def process_chunk(args):
+    chunk, args = args
+    result = chunk.apply(count_stock_fht, args=args, squeeze=True)
+    if isinstance(result, pd.DataFrame):
+        result_matrix = [result.values.reshape(4, -1)]
+    elif len(result) > 0:
+        result_matrix = [series.reshape(4, -1) for series in result]
+    else:
+        return pd.DataFrame()
+
+    return _format_results(result_matrix)
+
+
+def _format_results(result: np.ndarray) -> pd.DataFrame:
+    stabilvol = pd.DataFrame(np.concatenate(result, axis=1).T,
+                                  columns=['Volatility', 'FHT', 'start', 'end'], )
+    stabilvol['Volatility'] = pd.to_numeric(stabilvol['Volatility'], errors='coerce')
+    stabilvol['FHT'] = pd.to_numeric(stabilvol['FHT'], errors='coerce')
+    return stabilvol
 
 
 def count_stock_fht(
@@ -267,26 +289,31 @@ class StabilVolter:
             self.stabilvol = pd.DataFrame(np.concatenate(result_matrix, axis=1).T, columns=['Volatility', 'FHT', 'start', 'end'])
         elif method == 'multi':
             # Multiprocessing method (faster)
-            # Uses the count_stock_fht function defined outside the class 
-            args_list = []
-            for col in self.data.columns:
-                args_list.append((
-                    self.data[col],
-                    self.threshold_start,
-                    self.threshold_end,
-                    self.divergence_limit,
-                    self.tau_min,
-                    self.tau_max
-                ))
-            
-            # Create process pool with fewer workers to reduce memory pressure
-            with mp.Pool(processes=10) as pool:
-                result = pool.map(_process_series_for_multiprocessing, args_list)
+            # Function to process a chunk of the dataframe
 
-            if sum(a.size for a in result) == 0:
+            # Split the dataframe into chunks
+            n_cores = mp.cpu_count() - 4
+            n_cols = len(self.data.columns)
+            chunk_size = max(1, n_cols // n_cores)
+            args = (
+                self.threshold_start,
+                self.threshold_end,
+                self.divergence_limit,
+                self.tau_min,
+                self.tau_max,
+            )
+            chunks = []
+            for i in range(0, n_cols, chunk_size):
+                end = min(i + chunk_size, n_cols)
+                chunks.append((self.data.iloc[:, i:end], args))
+                
+            # Parallel processing 
+            with mp.Pool(n_cores) as pool:
+                # result = list(tqdm(pool.imap(process_chunk, chunks), total=len(chunks)))
+                result = list(tqdm(pool.imap(process_chunk, chunks), total=len(chunks)))
+            if len(result) == 0:
                 raise ValueError("No results for this choise of parameters.")
-
-            self.stabilvol = self.__format_results(result)
+            self.stabilvol = pd.concat(result)
         else:
             # Numpy method
             np.apply_along_axis(self.count_stock_fht, 0, self.data.values)
