@@ -25,14 +25,14 @@ import os
 import requests
 from sqlalchemy import create_engine, except_
 
-MARKETS = ['UN_little']
+MARKETS = ['UN']
 START_DATE = '1980-01-01'
 END_DATE = '2022-07-01'
 CRITERION = 'percentage'
 VALUE = 0.05
-COUNTING_METHOD = 'multi'  # This uses multiprocessing
+COUNTING_METHOD = 'pandas'  # This uses multiprocessing
 START_LEVEL = -2.0
-END_LEVEL = -1.0
+END_LEVEL = 0.0
 
 PLOT_FHT = False
 
@@ -131,7 +131,7 @@ def main():
     return stabilvols
 
 
-def send_notification(start, end):
+def send_notification(start, end, error=None):
     token = os.getenv('PYTHONNOTIFIER_TOKEN')
     account_id = os.getenv('TELEGRAM_ID')
     if token is None or account_id is None:
@@ -139,8 +139,11 @@ def send_notification(start, end):
         return None
     
     url = f"https://api.telegram.org/bot{token}"
-    message = f"""Your code finished running! 
-    It started at {start} and ended at {end}, taking {end-start} seconds"""
+    message = "\n".join(
+        f"Your code finished running!\n",
+        f"It started at {start} and ended at {end}, taking {end-start} seconds.\n",
+        f"It raised {error if error is not None else 'no errors'}."
+    )
     params = {
         "chat_id": account_id, 
         "text": message}
@@ -159,10 +162,12 @@ if __name__ == '__main__':
     start_time = datetime.now()
     try:
         main()
-    except Exception as e:
-        print(f"Error while processing: {e}")
+    except Exception as error:
+        print(f"Error while processing: {error}")
+    else:
+        error = None
     end_time = datetime.now()
     print(f"\n{'_'*20}\nTotal Elapsed time: {end_time - start_time} seconds\n\n")
-    send_notification(start_time, end_time)
+    send_notification(start_time, end_time, error)
 
 
