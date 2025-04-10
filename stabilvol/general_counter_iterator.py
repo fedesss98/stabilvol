@@ -26,6 +26,9 @@ from utility.functions import list_database_thresholds
 import pandas as pd
 import matplotlib.pyplot as plt
 import sqlalchemy
+import argparse
+import requests
+import os
 
 
 MARKETS = ['UN', 'UW', 'LN', 'JT']
@@ -33,15 +36,35 @@ START_DATE = '1980-01-01'
 END_DATE = '2022-07-01'
 CRITERION = 'percentage'
 VALUE = 0.05
+COUNTING_METHOD = 'multi'
 
-START_LEVELS = [2.0, 1.0, 0.5, 0.2, 0.1]
-DELTAS = [2.0, 1.0, 0.5, 0.2, 0.1]
+START_LEVELS = [2.0, 1.5, 1.0, 0.5, -0.5, -1.0, -1.5, -2.0]
+DELTAS = [1.0, -1.0]
 LEVELS = {
     (round(start, 2), round(start+delta, 2)) for start in START_LEVELS for delta in DELTAS
 }
-TAU_MAX = 1000000
+TAU_MAX = 30
 
 DATABASE = ROOT / 'data/interim'
+PLOT_FHT = False
+
+
+def parse_arguments():
+    # Set up argument parser
+    parser = argparse.ArgumentParser(description='Stabilizing Volatility Analysis')
+    
+    # Add arguments
+    parser.add_argument('-m', '--markets', type=str, nargs='+', default=MARKETS, help='Markets to analyze')
+    parser.add_argument('-l', '--levels', type=float, nargs='+', default=LEVELS, help='Levels to analyze')
+    parser.add_argument('--method', type=str, default=COUNTING_METHOD, choices=['pandas', 'multi', 'numpy'], 
+                        help='Method to use for calculation (default: multi)')
+    parser.add_argument('--tau-min', type=int, default=2, 
+                        help='Minimum tau value (default: 2)')
+    parser.add_argument('--tau-max', type=int, default=TAU_MAX, 
+                        help='Maximum tau value')
+    
+    # Parse arguments
+    return parser.parse_args()
 
 
 def save_to_database(database_dir, stabilvol: pd.DataFrame, start_level: float, end_level: float):
@@ -55,6 +78,8 @@ def save_to_database(database_dir, stabilvol: pd.DataFrame, start_level: float, 
 
 
 def main():
+    args = parse_arguments()
+
     accountant = DataExtractor(
         start_date=START_DATE,
         end_date=END_DATE,
@@ -63,29 +88,16 @@ def main():
         sigma_range=(1e-5, 1e5)
     )
     # Make global variables local
-    levels = LEVELS
-    markets = MARKETS
-    print(LEVELS)
-    """
-    {(-0.2, 0.0), (-0.5, 0.0), (-0.5, 0.5), (-0.1, 1.9), (-1.0, -0.8), 
-    (-0.1, 0.1), (-0.2, 1.8), (-0.2, -0.1), (-2.0, -1.0), (-1.0, 1.0), 
-    (-0.1, 0.0), (-1.0, -0.9), (-0.2, 0.3), (-0.2, 0.8), (-2.0, -1.8), 
-    (-0.1, 0.4), (-0.1, 0.9), (-1.0, -0.5), (-1.0, 0.0), (-2.0, 0.0 ), 
-    (-0.5, -0.3), (-0.5, 1.5), (-2.0, -1.9), (-0.5, -0.4), (-2.0, -1.5)}
-    for positive deltas
-    {(-0.2, -2.2), (-1.0, -1.1), (-0.1, -2.1), (-1.0, -2.0), (-2.0, -2.5),
-    (-0.5, -0.6), (-1.0, -1.2), (-2.0, -2.1), (-0.5, -1.5), (-0.2, -0.7),
-    (-0.5, -0.7), (-2.0, -2.2), (-1.0, -3.0), (-2.0, -3.0), (-0.1, -0.6), 
-    (-0.2, -0.30000000000000004), (-0.5, -1.0), (-0.5, -2.5), (-0.1, -0.2), 
-    (-0.1, -1.1), (-0.2, -0.4), (-0.2, -1.2), (-1.0, -1.5), (-2.0, -4.0), 
-    (-0.1, -0.30000000000000004)}
-    for negative deltas
-    """
+    levels = args.levels
+    markets = args.markets
+    print(f"Iterating in levels: {levels}")
+    
     selection_type = 'trapezoidal_selection' if CRITERION == 'percentage' else 'rectangular_selection'
-    database_dir = ROOT / f'data/processed/{selection_type}/stabilvol.sqlite'
+
+    database_dir = ROOT / f'data/processed/{selection_type}/stabilvol_filtered.sqlite'
     saved_levels = list_database_thresholds(database_dir).values.tolist()
     for i, (start_level, end_level) in enumerate(levels):
-        if [start_level, end_level] in saved_levels:
+        if (start_level, end_level) in saved_levels:
             print(f"Skipping {start_level, end_level}...")
             continue
         print(f"- {i/len(levels)}% ({start_level, end_level}) ")
@@ -96,17 +108,29 @@ def main():
             tau_max=TAU_MAX)
 
         for market in markets:
-            #print(f"\n{'-'*25}\nCounting {market} stabilvol with thresholds {start_level, end_level}...")
+            print(f"\n{'-'*25}\nCounting {market} stabilvol starting at {datetime.now()}...")
             # GET STABILVOL
-            #start_time = datetime.now()
-            stabilvol = get_stabilvol(market, accountant, analyst)
-            #end_time = datetime.now()
-            #print(f"Stabilvol calculated in {end_time - start_time} seconds\n")
+            start_time = datetime.now()
+            data = accountant.extract_data(DATABASE / f'{market}.pickle')
 
-            # STATISTICS
-            # print_indicators_table('FHT Indicators'.upper(), analyst.get_indicators(stabilvol))
-            # analyst.plot_fht(title=f"{market} FHT")
-            # plt.show()
+            analysis_info = {'Market': market}  # Info column to add to result DataFrame
+            try:
+                stabilvol = analyst.get_stabilvol(data, method=args.method, **analysis_info)
+            except ValueError as e:
+                print(f"Error in counting stabilvol: {e}")
+                analyst.data = None
+                stabilvol = pd.DataFrame()
+            else:
+                stabilvols.append(stabilvol)
+                # STATISTICS
+                print_indicators_table('FHT Indicators'.upper(), analyst.get_indicators(stabilvol))
+                if PLOT_FHT:
+                    analyst.plot_fht(title=f"{market} FHT")
+                    plt.show()
+
+            finally:
+                end_time = datetime.now()
+                print(f"Stabilvol calculated in {end_time - start_time} seconds\n")
 
             stabilvols.append(stabilvol)
 
@@ -119,6 +143,11 @@ if __name__ == '__main__':
     from datetime import datetime
 
     start_time = datetime.now()
-    main()
+    run_error = None
+    try:
+        main()
+    except Exception as e:
+        print(f"Error while processing: {e}")
+        run_error = e
     end_time = datetime.now()
     print(f"\n{'_'*20}\nTotal Elapsed time: {end_time - start_time} seconds\n\n")
