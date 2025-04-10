@@ -35,7 +35,7 @@ def count_stock_fht(
         raise ValueError("Strange series")
     if end_level > start_level:
         # Reverse series
-        start_level, end_level, series = -end_level, -start_level, -series
+        series, start_level, end_level = -series, -start_level, -end_level
     counting = False
     counting_time = 0
     fht = []
@@ -46,7 +46,7 @@ def count_stock_fht(
     start_counting_date = pd.Timestamp('1980-01-01')
     # Ignore datetime indexes for iteration, use only integers
     for t, (date, level) in enumerate(series.items()):
-        if not counting and level > start_level:
+        if not counting and level < start_level:
             # Start counting
             counting = True
             start_t = t
@@ -54,7 +54,7 @@ def count_stock_fht(
         if abs(level) > divergence_limit and counting_time < tau_max:
             # Stop counting and pass on
             counting = False
-        if counting and level < end_level:
+        if counting and level > end_level:
             # Stop counting and take FHT
             counting = False
             end_t = t
@@ -72,11 +72,6 @@ def count_stock_fht(
     if squeeze:
         stock_stabilvol = stock_stabilvol.flatten()
     return stock_stabilvol
-
-
-def _process_series_for_multiprocessing(args):
-    # Unpack the arguments and call the counting function
-    return count_stock_fht(*args)
 
 
 class StabilVolter:
@@ -182,7 +177,7 @@ class StabilVolter:
         return input_dict
 
     def count_stock_fht(
-            self, series, squeeze=False, threshold_start=None, threshold_end=None, divergence_limit=None
+            self, series, threshold_start=None, threshold_end=None, divergence_limit=None, squeeze=False
     ):
         """
         Count First Hitting Times of one stock returns series.
@@ -205,7 +200,7 @@ class StabilVolter:
             raise ValueError("Strange series")
         if end_level > start_level:
             # Reverse series
-            start_level, end_level, series = -end_level, -start_level, -series
+            series, start_level, end_level = -series, -start_level, -end_level
         counting = False
         counting_time = 0
         fht = []
@@ -216,15 +211,15 @@ class StabilVolter:
         start_counting_date = pd.Timestamp('1980-01-01')
         # Ignore datetime indexes for iteration, use only integers
         for t, (date, level) in enumerate(series.items()):
-            if not counting and level > start_level:
+            if not counting and level < start_level:
                 # Start counting
                 counting = True
                 start_t = t
                 start_counting_date = date
-            if counting and (abs(level) > divergence_limit and counting_time < self.tau_max):
+            if abs(level) > divergence_limit and counting_time < self.tau_max:
                 # Stop counting and pass on
                 counting = False
-            if counting and level < end_level:
+            if counting and level > end_level:
                 # Stop counting and take FHT
                 counting = False
                 end_t = t
@@ -250,6 +245,7 @@ class StabilVolter:
         stabilvol['Volatility'] = pd.to_numeric(stabilvol['Volatility'], errors='coerce')
         stabilvol['FHT'] = pd.to_numeric(stabilvol['FHT'], errors='coerce')
         return stabilvol
+
 
     def get_stabilvol(self, data=None, method='pandas', **frame_info) -> pd.DataFrame:
         """
