@@ -136,6 +136,30 @@ def main():
 
         stabilvols = pd.concat(stabilvols, axis=0)
         save_to_database(database_dir, stabilvols, start_level, end_level)
+
+    return None
+
+
+def send_notification(start, end, run_error=None):
+    token = os.getenv('PYTHONNOTIFIER_TOKEN')
+    account_id = os.getenv('TELEGRAM_ID')
+    if token is None or account_id is None:
+        print("\nUnable to send notification, I lack env variables.")
+        return None
+    
+    url = f"https://api.telegram.org/bot{token}"
+    message = f"""Your code finished running! 
+    It started at {start} and ended at {end}, taking {end-start} seconds.
+    It raised {run_error if run_error is not None else 'no errors'}."""
+    params = {
+        "chat_id": account_id, 
+        "text": message}
+    try:
+        r = requests.get(url + '/sendMessage', params=params)
+    except Exception as e:
+        print(f"Unable to send notification: {e}")
+    else:
+        print(f"Request sent with status code: {r.status_code}")
     return None
 
 
@@ -151,3 +175,4 @@ if __name__ == '__main__':
         run_error = e
     end_time = datetime.now()
     print(f"\n{'_'*20}\nTotal Elapsed time: {end_time - start_time} seconds\n\n")
+    send_notification(start_time, end_time, run_error=run_error)
