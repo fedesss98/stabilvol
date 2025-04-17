@@ -38,8 +38,8 @@ CRITERION = 'percentage'
 VALUE = 0.05
 COUNTING_METHOD = 'multi'
 
-START_LEVELS = [2.0, 1.5, 1.0, 0.5, -0.5, -1.0, -1.5, -2.0]
-DELTAS = [1.0, -1.0]
+START_LEVELS = [1.2, 1.4, 1.0, 0.8, 0.6, 0.4, 0.2, -0.2, -0.4, -0.6, -0.8, -1.0, -1.2, -1.4]
+DELTAS = [0.2, -0.2]
 LEVELS = {
     (round(start, 2), round(start+delta, 2)) for start in START_LEVELS for delta in DELTAS
 }

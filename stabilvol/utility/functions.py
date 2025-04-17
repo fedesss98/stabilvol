@@ -269,6 +269,29 @@ def plot_rolling_pmesh(coefficients, windows, values, **kwargs):
     return fig, outcasts
 
 
+def format_mfht_directory(selection_criterion, volatility):
+    # Convert the number to a float to ensure proper handling
+    num = float(volatility)
+    
+    # Extract the integer part and decimal part
+    int_part = int(num)
+    decimal_part = num - int_part
+    
+    # Format the integer part to have at least 2 digits
+    int_str = f"{int_part:02d}"
+    
+    # For the decimal part, handle it only if it's non-zero
+    if decimal_part > 0:
+        # Convert to string, remove '0.' prefix, and ensure no scientific notation
+        decimal_str = f"{decimal_part:.10f}".split('.')[1].rstrip('0')
+        result = int_str + decimal_str
+    else:
+        result = int_str
+    
+    # Return the final string with 'vol' prefix
+    return f"data/processed/{selection_criterion}_selection/vol{result}"
+
+
 if __name__ == "__main__":
     database = "../../data/processed/trapezoidal_selection/stabilvol.sqlite"
     list_database_thresholds(database)
