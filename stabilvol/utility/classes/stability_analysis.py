@@ -481,7 +481,7 @@ class StabilVolter:
         if stock is not None:
             series = self.data[stock].dropna()
             x_range = (series.index[0], series.index[-1]) if x_range is None else x_range
-            ax.plot(series.loc[slice(x_range[0], x_range[-1])], label=stock)
+            ax.plot(series.loc[slice(x_range[0], x_range[-1])], marker='o', mfc='w', label=stock)
         else:
             x_range = (0, 1)
         ax.fill_between(x_range, self.threshold_start, self.threshold_end, color='aquamarine', alpha=0.2)
