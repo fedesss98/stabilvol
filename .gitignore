@@ -4,6 +4,7 @@ static/
 
 # Ignore ipynb checkpoints
 
+
 # Images and plots
 visualization/
 
@@ -206,6 +207,7 @@ target/
 
 # Jupyter Notebook
 .ipynb_checkpoints
+.virtual_documents/
 
 # IPython
 profile_default/
