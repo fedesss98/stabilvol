@@ -8,11 +8,11 @@ import sqlite3
 import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib import colors
-
 # from sqlalchemy import create_engine
 from tqdm import tqdm
+import datetime
 
-STARTING_BINS = 200
+STARTING_BINS = 25
 VOL_LIMIT = 0.5
 DATABASE = '../data/processed/trapezoidal_selection/stabilvol.sqlite'
 
@@ -101,9 +101,13 @@ def list_database_thresholds(database) -> pd.DataFrame:
     return thresholds
 
 
-def query_data(database, query):
-    engine = create_engine(f'sqlite:///{database}')
-    return pd.read_sql_query(query, con=engine)
+# def query_data(database, query):
+#     engine = create_engine(f'sqlite:///{database}')
+#     return pd.read_sql_query(query, con=engine)
+
+
+def error_on_the_mean(values):
+    return np.std(values) / np.sqrt(len(values))
 
 
 def select_bins(df, max_n=1000, min_n = STARTING_BINS):
@@ -113,46 +117,70 @@ def select_bins(df, max_n=1000, min_n = STARTING_BINS):
     If in each bin there are more than max_n observations, the number of bins is increased by 100.
     """
     nbins = min_n
+    # Take the numpy arrays of the columns for faster access
+    volatility = df['Volatility'].values
+    fht = df['FHT'].values
 
-    while True:
-        # Use qcut to bin 'Volatility' values
-        df['Bins'] = pd.qcut(df['Volatility'], nbins, duplicates='drop')
-
-        # Group by the bins and calculate the mean and standard error of 'value' and the number of observations in each bin
-        grouped = df.groupby('Bins')['FHT'].agg(['mean', 'size'])
-        # Take the lowest count of observations in the bins
-        count = grouped['size'].min()
-
-        if count < max_n or nbins > 1000:
-            break
-        else:
-            nbins += 100
+    while nbins <= 1000:
+        try:
+            # Use qcut with numpy arrays - faster
+            bins = pd.qcut(volatility, nbins, duplicates='drop')
+            
+            # Create DataFrame only once
+            temp_df = pd.DataFrame({'Bins': bins, 'FHT': fht})
+            
+            # Group and aggregate
+            grouped = temp_df.groupby('Bins', observed=True)['FHT'].agg([
+                'mean', error_on_the_mean, 'size'
+            ])
+            
+            count = grouped['size'].min()
+            
+            if count < max_n:
+                return grouped, nbins
+                
+        except ValueError:  # Handle edge cases in qcut
+            pass
+            
+        nbins += 20
+    
+    # Fallback if we exceed 1000 bins
     return grouped, nbins
 
 
-def error_on_the_mean(values):
-    return np.std(values) / np.sqrt(len(values))
-
-
-def query_binned_data(market: str, start_date:str, end_date:str = None, vol_limit:float = 0.5, t1_string:str = "m0p5", t2_string:str = "m1p5", conn=None):
+def query_binned_data(
+        market:str, 
+        start_date:str, 
+        end_date:str = None, 
+        vol_limit:float = 0.5,
+        tau_max:int = 30,
+        t1_string:str = "m0p5", 
+        t2_string:str = "m1p5", 
+        conn=None,
+        raise_error:bool = True):
     grouped_data = None
     conn = sqlite3.connect(DATABASE) if conn is None else conn
     end_date = '2023-01-01' if end_date is None else end_date
     try:            
         # Write the SQL query
         query = f'''
-        SELECT *
+        SELECT Volatility, FHT
         FROM stabilvol_{t1_string}_{t2_string}
-        WHERE Volatility < {vol_limit} 
-        AND Market = "{market}"
-        AND start >= "{start_date}"
-        AND end <= "{end_date}"    
+        WHERE Volatility < ? 
+        AND Market = ?
+        AND start >= ?
+        AND end <= ?
+        AND FHT <= ?
         '''
         # Load the FHT data from the database
-        df = pd.read_sql_query(query, conn)
+        df = pd.read_sql_query(query, conn, params=(vol_limit, market, start_date, end_date, tau_max))
+        
     except pd.errors.DatabaseError:
-        print(f'No data for market {market} with thresholds {t1_string}-{t2_string}')
-        nbins = 0
+        if raise_error:
+            raise ValueError(f'No data for market {market} with thresholds {t1_string}-{t2_string} from {start_date} to {end_date}')
+        else:
+            print(f'No data for market {market} with thresholds {t1_string}-{t2_string} from {start_date} to {end_date}')
+            return pd.DataFrame(), 0
     else:
         if len(df) > 50:
             return select_bins(df)
@@ -290,6 +318,18 @@ def format_mfht_directory(selection_criterion, volatility):
     
     # Return the final string with 'vol' prefix
     return f"data/processed/{selection_criterion}_selection/vol{result}"
+
+
+def roll_windows(duration=90,  start_date=None, end_date=None):
+    # Define the start and end dates
+    start_date = datetime.date(1980, 1, 1) if start_date is None else start_date
+    end_date = datetime.date(2022, 7, 1) if end_date is None else end_date
+    
+    half_win_len = pd.to_timedelta(duration//2, 'D')
+    start = start_date + half_win_len
+    end = end_date - half_win_len
+    centers = pd.date_range(start, end, freq='D')
+    return [(mid - half_win_len, mid + half_win_len) for mid in centers]
 
 
 if __name__ == "__main__":
