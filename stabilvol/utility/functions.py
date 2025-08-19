@@ -161,6 +161,10 @@ def query_binned_data(
     grouped_data = None
     conn = sqlite3.connect(DATABASE) if conn is None else conn
     end_date = '2023-01-01' if end_date is None else end_date
+    # If your dates are datetime objects, convert them:
+    start_date = start_date.strftime('%Y-%m-%d') if hasattr(start_date, 'strftime') else str(start_date)
+    end_date = end_date.strftime('%Y-%m-%d') if hasattr(end_date, 'strftime') else str(end_date)
+
     try:            
         # Write the SQL query
         query = f'''
@@ -175,7 +179,7 @@ def query_binned_data(
         # Load the FHT data from the database
         df = pd.read_sql_query(query, conn, params=(vol_limit, market, start_date, end_date, tau_max))
         
-    except pd.errors.DatabaseError:
+    except pd.errors.DatabaseError as e:
         if raise_error:
             raise ValueError(f'No data for market {market} with thresholds {t1_string}-{t2_string} from {start_date} to {end_date}')
         else:
