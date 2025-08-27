@@ -15,8 +15,8 @@ DATABASE = ROOT_DIR / 'data/processed/trapezoidal_selection/stabilvol_filtered.s
 
 MARKETS = ["UN", "UW", "LN", "JT"]
 
-START_LEVELS = [3.0, 2.6, 2.2, 1.8, 1.4, 1., 0.6, 0.2]
-DELTAS = [-0.2, -0.4, -0.8, -1.0]
+START_LEVELS = [1.4, 1., 0.6]
+DELTAS = [-0.2, -0.4, -0.8]
 LEVELS = {
     (round(start, 2), round(start+delta, 2)) for start in START_LEVELS for delta in DELTAS
 }
@@ -52,8 +52,8 @@ def main():
     print(f"Selected {len(windows)} rolling windows for the analysis.")
     
     # Start taking maximum values of MFHT in each window
-    max_values = np.zeros((len(MARKETS), len(LEVELS), len(windows)))
-    outcasts = np.zeros((len(MARKETS), len(LEVELS), len(windows)))
+    max_values = [np.zeros((len(LEVELS), len(windows))) for _ in range(len(MARKETS))]
+    outcasts = [np.zeros((len(LEVELS), len(windows))) for _ in range(len(MARKETS))]
     coefficients = [(f.stringify_threshold(t1), f.stringify_threshold(t2)) for t1, t2 in LEVELS]
     for i, market in enumerate(MARKETS):
         for j, (t1, t2) in enumerate(tqdm(coefficients, leave=True, desc=f"Processing market {market}")):
@@ -64,17 +64,18 @@ def main():
                         market, start, end, VOL_LIMIT, TAU_MAX, t1, t2, conn=conn
                     )
                 except ValueError:
-                    outcasts[i, j, w] = 1
+                    outcasts[i][j, w] = 1
                 else:
                     if not mfht.empty:
                         # Take the maximum MeanFHT in this window with this thresholds
-                        max_values[i, j, w] = mfht['mean'].max()
+                        max_values[i][j, w] = mfht['mean'].max()
                     else:
-                        outcasts[i, j, w] = 1
-        print(f"There are {np.sum(outcasts[i, j, :] == 1)} outcasts for market {market}")
+                        outcasts[i][j, w] = 1
+        np.save(ROOT_DIR / f'data/processed/dynamics/{market}_rolling_{WINDOWS_DURATION}d_MFHT_peaks.npy', max_values[i])
+        np.save(ROOT_DIR / f'data/processed/dynamics/{market}_rolling_{WINDOWS_DURATION}d_MFHT_outcasts.npy', outcasts[i])
+        print(f"There are {np.sum(outcasts[i] == 1)} outcasts for market {market}")
     
     conn.close()
-    np.save(ROOT_DIR / f'data/processed/dynamics/rolling_{WINDOWS_DURATION}d_MFHT_peaks.npy', max_values)
 
 
 
