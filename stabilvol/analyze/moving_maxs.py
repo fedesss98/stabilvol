@@ -1,3 +1,13 @@
+"""
+Experiment 1:
+START_LEVELS = [1.4, 1., 0.6]
+DELTAS = [-0.2, -0.4, -0.8]
+______________________________
+Experiment 2:
+START_LEVELS = [1.4, 1., 0.6]
+DELTAS = [0.2, 0.4, 0.8]
+"""
+
 import pandas as pd
 import numpy as np
 from multiprocessing import Pool
@@ -15,8 +25,9 @@ DATABASE = ROOT_DIR / 'data/processed/trapezoidal_selection/stabilvol_filtered.s
 
 MARKETS = ["UN", "UW", "LN", "JT"]
 
+EXPERIMENT = 2
 START_LEVELS = [1.4, 1., 0.6]
-DELTAS = [-0.2, -0.4, -0.8]
+DELTAS = [0.2, 0.4, 0.8]
 LEVELS = {
     (round(start, 2), round(start+delta, 2)) for start in START_LEVELS for delta in DELTAS
 }
@@ -71,8 +82,8 @@ def main():
                         max_values[i][j, w] = mfht['mean'].max()
                     else:
                         outcasts[i][j, w] = 1
-        np.save(ROOT_DIR / f'data/processed/dynamics/{market}_rolling_{WINDOWS_DURATION}d_MFHT_peaks.npy', max_values[i])
-        np.save(ROOT_DIR / f'data/processed/dynamics/{market}_rolling_{WINDOWS_DURATION}d_MFHT_outcasts.npy', outcasts[i])
+        np.save(ROOT_DIR / f'data/processed/dynamics/{market}_rolling_{WINDOWS_DURATION}d_MFHT_peaks_{EXPERIMENT}.npy', max_values[i])
+        np.save(ROOT_DIR / f'data/processed/dynamics/{market}_rolling_{WINDOWS_DURATION}d_MFHT_outcasts_{EXPERIMENT}.npy', outcasts[i])
         print(f"There are {np.sum(outcasts[i] == 1)} outcasts for market {market}")
     
     conn.close()
