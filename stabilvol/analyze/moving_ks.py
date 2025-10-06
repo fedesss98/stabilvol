@@ -5,58 +5,38 @@ DELTAS = [-0.2, -0.4, -0.8]
 DAYS_APART = 27
 ______________________________
 Experiment 2:
-START_LEVELS = [1.4, 1., 0.6]
+START_LEVELS = [-1.8, -1.4, -1., -0.6]
 DELTAS = [0.2, 0.4, 0.8]
 DAYS_APART = 27
 ______________________________
 Experiment 3:
-START_LEVELS = [-1.4, -1., -0.6]
-DELTAS = [0.2, 0.4, 0.8]
-DAYS_APART = 27
+START_LEVELS = [1.8, 1.4, 1., 0.6]
+DELTAS = [-0.2, -0.4, -0.8]
+DAYS_APART = 90
 ______________________________
 Experiment 4:
-START_LEVELS = [-1.4, -1., -0.6]
-DELTAS = [-0.2, -0.4, -0.8]
-DAYS_APART = 27
+START_LEVELS = [-1.8, -1.4, -1., -0.6]
+DELTAS = [0.2, 0.4, 0.8]
+DAYS_APART = 90
 ______________________________
 Experiment 5:
-START_LEVELS = [1.4, 1., 0.6]
+START_LEVELS = [1.8, 1.4, 1., 0.6]
 DELTAS = [-0.2, -0.4, -0.8]
-DAYS_APART = 90
+DAYS_APART = 120
 ______________________________
 Experiment 6:
-START_LEVELS = [1.4, 1., 0.6]
+START_LEVELS = [-1.8, -1.4, -1., -0.6]
 DELTAS = [0.2, 0.4, 0.8]
-DAYS_APART = 90
+DAYS_APART = 120
 ______________________________
 Experiment 7:
-START_LEVELS = [-1.4, -1., -0.6]
-DELTAS = [0.2, 0.4, 0.8]
-DAYS_APART = 90
+START_LEVELS = [1.8, 1.4, 1., 0.6]
+DELTAS = [-0.2, -0.4, -0.8]
+DAYS_APART = 10
 ______________________________
 Experiment 8:
-START_LEVELS = [-1.4, -1., -0.6]
-DELTAS = [-0.2, -0.4, -0.8]
-DAYS_APART = 90
-______________________________
-Experiment 9:
-START_LEVELS = [1.4, 1., 0.6]
-DELTAS = [-0.2, -0.4, -0.8]
-DAYS_APART = 10
-______________________________
-Experiment 10:
-START_LEVELS = [1.4, 1., 0.6]
+START_LEVELS = [-1.8, -1.4, -1., -0.6]
 DELTAS = [0.2, 0.4, 0.8]
-DAYS_APART = 10
-______________________________
-Experiment 11:
-START_LEVELS = [-1.4, -1., -0.6]
-DELTAS = [0.2, 0.4, 0.8]
-DAYS_APART = 10
-______________________________
-Experiment 12:
-START_LEVELS = [-1.4, -1., -0.6]
-DELTAS = [-0.2, -0.4, -0.8]
 DAYS_APART = 10
 ______________________________
 """
@@ -80,9 +60,10 @@ DATABASE = ROOT_DIR / 'data/processed/trapezoidal_selection/stabilvol_filtered.s
 
 MARKETS = ["UN", "UW", "LN", "JT"]
 
-EXPERIMENT = 1
-START_LEVELS = [1.4, 1., 0.6]
+EXPERIMENT = 5
+START_LEVELS = [1.8, 1.4, 1., 0.6]
 DELTAS = [-0.2, -0.4, -0.8]
+DAYS_APART = 120 
 LEVELS = {
     (round(start, 2), round(start+delta, 2)) for start in START_LEVELS for delta in DELTAS
 }
@@ -91,6 +72,9 @@ WINDOWS_DURATION = 90  # days
 
 VOL_LIMIT= 100  # Change this will change all the pickle files, remember to re-generate them
 TAU_MAX = 30
+
+MIN_BINS = -1  # This will return FHT values without binning
+
 
 def parse_arguments():
     parser = argparse.ArgumentParser()
@@ -123,7 +107,7 @@ def test_ks(df1, df2):
 def main():
     args = parse_arguments()
 
-    days_apart = args.days_apart
+    days_apart = args.days_apart if DAYS_APART is None else DAYS_APART
 
     print(os.getcwd())
     if not os.path.exists(DATABASE):
@@ -147,12 +131,14 @@ def main():
                 start, end = window
                 next_start, next_end = start + pd.to_timedelta(days_apart, 'D'), end + pd.to_timedelta(days_apart, 'D')
                 try:
-                    mfht, nbins = f.query_binned_data(
-                        market, start, end, VOL_LIMIT, TAU_MAX, t1, t2, conn=conn
+                    mfht, _ = f.query_binned_data(
+                        market, start, end, VOL_LIMIT, TAU_MAX, t1, t2, conn=conn,
+                        min_bins=MIN_BINS
                     )
 
                     mfht_next, _ = f.query_binned_data(
-                        market, next_start, next_end, VOL_LIMIT, TAU_MAX, t1, t2, conn=conn
+                        market, next_start, next_end, VOL_LIMIT, TAU_MAX, t1, t2, conn=conn,
+                        min_bins=MIN_BINS
                     )
                 except ValueError:
                     outcasts[i][j, w] = 1
