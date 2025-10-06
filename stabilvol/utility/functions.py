@@ -150,9 +150,8 @@ def select_bins(df, max_n=1000, min_n = STARTING_BINS):
 
 def query_binned_data(
         market:str, 
-        start_date:str, 
-        end_date:str = None, 
-        vol_limit:float = 0.5,
+        start_date:str | pd.Timestamp, 
+        end_date:str | pd.Timestamp | None = None, 
         tau_max:int = 30,
         t1_string:str = "m0p5", 
         t2_string:str = "m1p5", 
