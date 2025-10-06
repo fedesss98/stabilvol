@@ -157,7 +157,9 @@ def query_binned_data(
         t1_string:str = "m0p5", 
         t2_string:str = "m1p5", 
         conn=None,
-        raise_error:bool = True):
+        raise_error:bool = True,
+        min_bins:int = STARTING_BINS,
+        max_bins:int = 1000):
     grouped_data = None
     conn = sqlite3.connect(DATABASE) if conn is None else conn
     end_date = '2023-01-01' if end_date is None else end_date
@@ -187,7 +189,10 @@ def query_binned_data(
             return pd.DataFrame(), 0
     else:
         if len(df) > 50:
-            return select_bins(df)
+            if min_bins < 1:
+                return df, -1
+            else:
+                return select_bins(df, max_n=max_bins, min_n=min_bins)
         else:
             raise ValueError(f'Not enough data for market {market} with thresholds {t1_string}-{t2_string} from {start_date} to {end_date}')
 
