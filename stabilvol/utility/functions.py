@@ -152,6 +152,7 @@ def query_binned_data(
         market:str, 
         start_date:str | pd.Timestamp, 
         end_date:str | pd.Timestamp | None = None, 
+        vol_limit: float = 0.5,
         tau_max:int = 30,
         t1_string:str = "m0p5", 
         t2_string:str = "m1p5", 
