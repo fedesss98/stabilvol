@@ -342,5 +342,10 @@ def roll_windows(duration=90,  start_date=None, end_date=None):
 
 
 if __name__ == "__main__":
-    database = "../../data/processed/trapezoidal_selection/stabilvol.sqlite"
+    database = "../../data/processed/trapezoidal_selection/stabilvol_filtered.sqlite"
     list_database_thresholds(database)
+    conn = sqlite3.connect(database)
+    df, _ = query_binned_data(market="UN", start_date="2008-01-01", min_bins=0, conn=conn)
+    print(df.columns)
+    df, _ = query_binned_data(market="UN", start_date="2008-01-01", min_bins=10, conn=conn)
+    print(df.columns)

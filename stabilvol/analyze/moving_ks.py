@@ -1,6 +1,6 @@
 """
 Experiment 1:
-START_LEVELS = [1.4, 1., 0.6]
+START_LEVELS = [1.8, 1.4, 1., 0.6]
 DELTAS = [-0.2, -0.4, -0.8]
 DAYS_APART = 27
 ______________________________
@@ -60,10 +60,10 @@ DATABASE = ROOT_DIR / 'data/processed/trapezoidal_selection/stabilvol_filtered.s
 
 MARKETS = ["UN", "UW", "LN", "JT"]
 
-EXPERIMENT = 5
+EXPERIMENT = 1
 START_LEVELS = [1.8, 1.4, 1., 0.6]
 DELTAS = [-0.2, -0.4, -0.8]
-DAYS_APART = 120 
+DAYS_APART = 27
 LEVELS = {
     (round(start, 2), round(start+delta, 2)) for start in START_LEVELS for delta in DELTAS
 }
@@ -73,12 +73,12 @@ WINDOWS_DURATION = 90  # days
 VOL_LIMIT= 100  # Change this will change all the pickle files, remember to re-generate them
 TAU_MAX = 30
 
-MIN_BINS = -1  # This will return FHT values without binning
+MIN_BINS = -1  # This will return FHT values without binning if < 1
 
 
 def parse_arguments():
     parser = argparse.ArgumentParser()
-    parser.add_argument('-d', '--days-apart', type=int, default=27, help="Next window distance to compare PDF of each rolling window")
+    parser.add_argument('-d', '--days-apart', type=int, default=DAYS_APART, help="Next window distance to compare PDF of each rolling window")
     return parser.parse_args()
 
 
@@ -131,21 +131,21 @@ def main():
                 start, end = window
                 next_start, next_end = start + pd.to_timedelta(days_apart, 'D'), end + pd.to_timedelta(days_apart, 'D')
                 try:
-                    mfht, _ = f.query_binned_data(
+                    fht, _ = f.query_binned_data(
                         market, start, end, VOL_LIMIT, TAU_MAX, t1, t2, conn=conn,
                         min_bins=MIN_BINS
                     )
 
-                    mfht_next, _ = f.query_binned_data(
+                    fht_next, _ = f.query_binned_data(
                         market, next_start, next_end, VOL_LIMIT, TAU_MAX, t1, t2, conn=conn,
                         min_bins=MIN_BINS
                     )
                 except ValueError:
                     outcasts[i][j, w] = 1
                 else:
-                    if not mfht.empty and not mfht_next.empty:
                         # Perform the Kolmogorov-Smirnov Test and take pvalue and statistic results
-                        pvalue, statistic = test_ks(mfht["mean"], mfht_next["mean"])
+                    if not fht.empty and not fht_next.empty:
+                        pvalue, statistic = test_ks(fht["FHT"], fht_next["FHT"])
                         pvalues[i][j, w] = pvalue
                         statistics[i][j, w] = statistic
                     else:
