@@ -329,7 +329,7 @@ def format_mfht_directory(selection_criterion, volatility):
     return f"data/processed/{selection_criterion}_selection/vol{result}"
 
 
-def roll_windows(duration=90,  start_date=None, end_date=None):
+def roll_windows(duration=90,  start_date=None, end_date=None, frequency='D'):
     # Define the start and end dates
     if start_date is None:
         start_date = datetime.date(1980, 1, 1)
@@ -344,7 +344,7 @@ def roll_windows(duration=90,  start_date=None, end_date=None):
     half_win_len = pd.to_timedelta(duration//2, 'D')
     start = start_date + half_win_len
     end = end_date - half_win_len
-    centers = pd.date_range(start, end, freq='D')
+    centers = pd.date_range(start, end, freq=frequency)
     return [(mid - half_win_len, mid + half_win_len) for mid in centers]
 
 
