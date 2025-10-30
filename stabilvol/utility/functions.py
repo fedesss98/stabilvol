@@ -331,8 +331,15 @@ def format_mfht_directory(selection_criterion, volatility):
 
 def roll_windows(duration=90,  start_date=None, end_date=None):
     # Define the start and end dates
-    start_date = datetime.date(1980, 1, 1) if start_date is None else start_date
-    end_date = datetime.date(2022, 7, 1) if end_date is None else end_date
+    if start_date is None:
+        start_date = datetime.date(1980, 1, 1)
+    elif isinstance(start_date, str):
+        start_date = pd.to_datetime(start_date).date()
+    
+    if end_date is None:
+        end_date = datetime.date(2022, 7, 1)
+    elif isinstance(end_date, str):
+        end_date = pd.to_datetime(end_date).date()
     
     half_win_len = pd.to_timedelta(duration//2, 'D')
     start = start_date + half_win_len
