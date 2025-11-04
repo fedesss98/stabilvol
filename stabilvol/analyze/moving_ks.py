@@ -58,12 +58,12 @@ from pathlib import Path
 ROOT_DIR = Path(__file__).resolve().parent.parent.parent
 DATABASE = ROOT_DIR / 'data/processed/trapezoidal_selection/stabilvol_filtered.sqlite'
 
-MARKETS = ["UN", "UW", "LN", "JT"]
+MARKETS = ["UN", "UW", "LN"]
 
-EXPERIMENT = 1
+EXPERIMENT = 3
 START_LEVELS = [1.8, 1.4, 1., 0.6]
 DELTAS = [-0.2, -0.4, -0.8]
-DAYS_APART = 27
+DAYS_APART = 90
 LEVELS = {
     (round(start, 2), round(start+delta, 2)) for start in START_LEVELS for delta in DELTAS
 }
