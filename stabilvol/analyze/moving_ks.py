@@ -58,7 +58,7 @@ from pathlib import Path
 ROOT_DIR = Path(__file__).resolve().parent.parent.parent
 DATABASE = ROOT_DIR / 'data/processed/trapezoidal_selection/stabilvol_filtered.sqlite'
 
-MARKETS = ["UN", "UW", "LN"]
+MARKETS = ["UN", "UW", "LN", "JT"]
 
 EXPERIMENT = 3
 START_LEVELS = [1.8, 1.4, 1., 0.6]
