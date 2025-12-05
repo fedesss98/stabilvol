@@ -17,7 +17,7 @@ theta i |                    theta f
 ______________________________________________________________________
 """
 
-from utility.definitions import ROOT
+from stabilvol import ROOT
 from utility.classes.data_extraction import DataExtractor
 from utility.classes.stability_analysis import StabilVolter
 from single_stabilvol import print_indicators_table, get_stabilvol
@@ -37,6 +37,7 @@ END_DATE = '2022-07-01'
 CRITERION = 'percentage'
 VALUE = 0.05
 COUNTING_METHOD = 'multi'
+RETURNS_TYPE = 'log'
 
 START_LEVELS = [1.8, 1.6, 1.4, 1.2, 1.0, -1.0, -1.2, -1.4, -1.6, -1.8]
 DELTAS = [1.0, 0.8, 0.6, 0.4, 0.2, -0.2, -0.4, -0.6, -0.8, -1.0]
@@ -111,7 +112,8 @@ def main():
             print(f"\n{'-'*25}\nCounting {market} stabilvol starting at {datetime.now()}...")
             # GET STABILVOL
             start_time = datetime.now()
-            data = accountant.extract_data(DATABASE / f'{market}.pickle')
+            returns_file = DATABASE / f'{market}.pickle' if RETURNS_TYPE == 'pct_change' else DATABASE / f'{market}_log.pickle'
+            data = accountant.extract_data(returns_file)
 
             analysis_info = {'Market': market}  # Info column to add to result DataFrame
             try:
