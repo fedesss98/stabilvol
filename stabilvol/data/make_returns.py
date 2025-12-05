@@ -21,8 +21,10 @@ class ReturnsMaker:
 
     def make_returns(self):
         if self.method == 'pct_change':
+            print("Calculating percentage change returns")
             df = self.price_data.pct_change(fill_method=None)
         elif self.method == 'log':
+            print("Calculating log returns")
             df = self.price_data.apply(lambda x: np.log(x) - np.log(x.shift(1)))
         else:
             raise ValueError(f"Unknown method: {self.method}")
@@ -44,6 +46,6 @@ class ReturnsMaker:
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     for market in MARKETS:
-        returns_maker = ReturnsMaker(market, method='log')
+        returns_maker = ReturnsMaker(market, method='pct_change')
         returns_maker.make_returns()
         returns_maker.save()
