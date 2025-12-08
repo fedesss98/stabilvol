@@ -24,6 +24,7 @@ from single_stabilvol import print_indicators_table, get_stabilvol
 from utility.functions import list_database_thresholds
 
 import pandas as pd
+import numpy as np
 import matplotlib.pyplot as plt
 import sqlalchemy
 import argparse
@@ -39,11 +40,14 @@ VALUE = 0.05
 COUNTING_METHOD = 'multi'
 RETURNS_TYPE = 'log'
 
-START_LEVELS = [1.8, 1.6, 1.4, 1.2, 1.0, -1.0, -1.2, -1.4, -1.6, -1.8]
-DELTAS = [1.0, 0.8, 0.6, 0.4, 0.2, -0.2, -0.4, -0.6, -0.8, -1.0]
+# LOW RALLIES
+START_LEVELS = [-0.1, -0.15, -0.2, -0.25, -0.3, -0.4, -0.5]
+DELTAS = np.linspace(0.01, 0.2, num=30)
 LEVELS = {
     (round(start, 2), round(start+delta, 2)) for start in START_LEVELS for delta in DELTAS
 }
+NORMALIZED = False  # Wether or not to scale thresholds by standard deviation
+
 TAU_MAX = 30
 
 DATABASE = ROOT / 'data/interim'
@@ -95,7 +99,7 @@ def main():
     
     selection_type = 'trapezoidal_selection' if CRITERION == 'percentage' else 'rectangular_selection'
 
-    database_dir = ROOT / f'data/processed/{selection_type}/stabilvol_filtered.sqlite'
+    database_dir = ROOT / f'data/processed/{selection_type}/stabilvol_logs.sqlite'
     saved_levels = list_database_thresholds(database_dir).values.tolist()
     for i, (start_level, end_level) in enumerate(levels):
         if (start_level, end_level) in saved_levels:
@@ -106,6 +110,7 @@ def main():
         analyst = StabilVolter(
             start_level=start_level,
             end_level=end_level,
+            std_normalization=NORMALIZED,
             tau_max=TAU_MAX)
 
         for market in markets:
