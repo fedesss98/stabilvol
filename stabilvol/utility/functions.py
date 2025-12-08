@@ -69,7 +69,12 @@ def numerify_threshold(t):
 
 def list_database_thresholds(database) -> pd.DataFrame:
     # Connect to the SQLite database
-    conn = sqlite3.connect(database)
+    try:
+        conn = sqlite3.connect(database)
+    except Exception as e:
+        print(f"Error while connecting to the database: {e}")
+        return 
+    
     cur = conn.cursor()
 
     # Query the database to get all table names
