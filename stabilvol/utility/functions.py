@@ -311,7 +311,7 @@ def plot_rolling_pmesh(coefficients, windows, values, **kwargs):
     return fig, outcasts
 
 
-def format_mfht_directory(selection_criterion, volatility):
+def format_mfht_directory(selection_criterion, volatility, string_id=''):
     # Convert the number to a float to ensure proper handling
     num = float(volatility)
     
@@ -331,7 +331,11 @@ def format_mfht_directory(selection_criterion, volatility):
         result = int_str
     
     # Return the final string with 'vol' prefix
-    return f"data/processed/{selection_criterion}_selection/vol{result}"
+    if string_id:
+        dir = f"data/processed/{selection_criterion}_selection/vol{result}_{string_id}"
+    else:
+        dir = f"data/processed/{selection_criterion}_selection/vol{result}"
+    return dir
 
 
 def roll_windows(duration=90,  start_date=None, end_date=None, frequency='D'):
