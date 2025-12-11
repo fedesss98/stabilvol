@@ -4,6 +4,7 @@ from tqdm import tqdm, trange
 from pathlib import Path
 from scipy import stats
 from scipy.optimize import curve_fit
+from joblib import Parallel, delayed
 
 MARKETS = [
     "UN", 
@@ -32,6 +33,7 @@ class InverseMultifractal:
         
         for q in q_orders:
             fluctuation_moments = []
+            valid_taus = []
             
             for tau in tau_lags:
                 # Calculate differences for lag tau
@@ -41,13 +43,22 @@ class InverseMultifractal:
                 if np.any(~np.isnan(dX)):
                     # Calculate q-th moment
                     moment = np.nanmean(dX ** q)
-                    fluctuation_moments.append(moment)
+
+                    if np.isfinite(moment) and moment > 0:
+                        fluctuation_moments.append(moment)
+                        valid_taus.append(tau)
             
             if len(fluctuation_moments) > 2:
                 # Fit Log-Log to find zeta(q)
-                # log(moment) = zeta * log(tau) + C
-                slope, intercept, _, _, _ = stats.linregress(np.log(tau_lags), np.log(fluctuation_moments))
-                results[q] = slope
+                # Use valid_taus instead of the original tau_lags
+                try:
+                    slope, intercept, _, _, _ = stats.linregress(
+                        np.log(valid_taus), 
+                        np.log(fluctuation_moments)
+                    )
+                    results[q] = slope
+                except ValueError:
+                    results[q] = np.nan
             else:
                 results[q] = np.nan
             
@@ -124,31 +135,54 @@ class InverseMultifractal:
         return results
 
 
-def main():
-    # q-orders to test (e.g., 1st moment, 2nd moment)
-    qs = [1, 2, 3] 
+def process_single_ticker(ticker, prices, taus, deltas, qs):
+    """
+    Worker function to calculate exponents for a single ticker.
+    Returns a list of products (zeta * chi) corresponding to the q-orders.
+    """
+    try:
+        # Initialize Analyzer with your class
+        analyzer = InverseMultifractal(prices)
 
-    taus = np.arange(1, 31).astype(int)
-
-    # Thresholds for Inverse Analysis (e.g., 0.5% to 5% moves)
-    # Note: These should be in Log-Scale units (approx percentage)
-    deltas = np.logspace(np.log10(0.0001), np.log10(0.1), 50)
-    results = {}
-    for market in MARKETS:
-        df = pd.read_pickle(PRICES / f"{market}.pickle")
-        market_results = []
-        for ticker, prices in tqdm(df.items()):
-            # Initialize Analyzer
-            analyzer = InverseMultifractal(prices)
-
-            zeta_exponents = analyzer.get_standard_fluctuations(taus, qs)
-            chi_exponents = analyzer.get_inverse_exit_times(deltas, qs)
-            market_results.append([zeta_exponents[q] * chi_exponents[q] for q in qs])
+        # Run Calculations
+        zeta_exponents = analyzer.get_standard_fluctuations(taus, qs)
+        chi_exponents = analyzer.get_inverse_exit_times(deltas, qs)
         
-        results[market] = np.mean(np.array(market_results), axis=0)
+        return [zeta_exponents[q] * chi_exponents[q] for q in qs]
+        
+    except Exception as e:
+        # If one ticker fails (e.g., too short, all NaNs), return NaNs
+        return [np.nan] * len(qs)
 
-    results = pd.DataFrame().from_dict(results, orient="index", columns=[f"q{q}" for q in qs])
-    results.to_csv(ROOT / "data/processed/multifractality/scaling_exponents.csv")
+
+def main():
+    # Setup parameters
+    taus = np.unique(np.logspace(0, 2, 20).astype(int)) # Example tau
+    deltas = np.logspace(np.log10(0.0001), np.log10(0.1), 50)
+    qs = [1, 2, 3] # Example qs (ensure this is defined)
+    
+    results = {}
+
+    for market in MARKETS:
+        print(f"Processing Market: {market}...")
+        
+        # Load data (Sequential to save RAM)
+        df = pd.read_pickle(PRICES / f"{market}.pickle")
+        
+        # 2. Parallelize the Inner Loop
+        # n_jobs=-1 uses all available CPU cores
+        market_results = Parallel(n_jobs=-1)(
+            delayed(process_single_ticker)(ticker, prices, taus, deltas, qs)
+            for ticker, prices in tqdm(df.items(), desc=f"Tickers in {market}")
+        )
+        
+        # Aggregate Results
+        results[market] = np.nanmean(np.array(market_results), axis=0)
+
+    # Save final results
+    final_df = pd.DataFrame.from_dict(results, orient="index", columns=[f"q{q}" for q in qs])
+    final_df.to_csv(ROOT / "data/processed/multifractality/scaling_exponents.csv")
+    print("Done!")
         
 
 if __name__ == "__main__":
