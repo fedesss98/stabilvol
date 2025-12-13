@@ -163,6 +163,7 @@ def query_binned_data(
         t2_string:str = "m1p5", 
         conn=None,
         raise_error:bool = True,
+        min_fht_num = 50,
         min_bins:int = STARTING_BINS,
         max_bins:int = 1000):
     grouped_data = None
@@ -193,7 +194,7 @@ def query_binned_data(
             print(f'No data for market {market} with thresholds {t1_string}-{t2_string} from {start_date} to {end_date}')
             return pd.DataFrame(), 0
     else:
-        if len(df) > 50:
+        if len(df) > min_fht_num:
             if min_bins < 1:
                 return df, -1
             else:
@@ -355,6 +356,17 @@ def roll_windows(duration=90,  start_date=None, end_date=None, frequency='D'):
     end = end_date - half_win_len
     centers = pd.date_range(start, end, freq=frequency)
     return [(mid - half_win_len, mid + half_win_len) for mid in centers]
+
+
+def setup_optimized_connection(database_path):
+    """Setup an optimized SQLite connection"""
+    conn = sqlite3.connect(database_path)
+    # SQLite optimizations
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL") 
+    conn.execute("PRAGMA cache_size=100000")  # Increase cache
+    conn.execute("PRAGMA temp_store=MEMORY")
+    return conn
 
 
 if __name__ == "__main__":
