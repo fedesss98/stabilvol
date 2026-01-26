@@ -5,6 +5,10 @@ from pathlib import Path
 from scipy import stats
 from scipy.optimize import curve_fit
 from joblib import Parallel, delayed
+import argparse
+
+from stabilvol.utility.functions import query_binned_data, stringify_threshold, setup_optimized_connection, list_database_thresholds
+
 
 MARKETS = [
     "UN", 
@@ -15,14 +19,16 @@ MARKETS = [
 
 ROOT = Path().parent.parent.parent
 PRICES = ROOT / 'data/raw'
+RETURNS = ROOT / 'data/interim'
+DATABASE = ROOT / 'data/processed/trapezoidal_selection/stabilvol_logs.sqlite'
+START = 0.3
 
 class InverseMultifractal:
-    def __init__(self, price_series):
+    def __init__(self, series):
         # Convert prices to Log-Prices for scaling analysis
         # X(t) = ln(P(t))
-        self.prices = np.array(price_series)
-        self.log_prices = np.log(self.prices)
-        self.n = len(self.log_prices)
+        self.series = np.array(series)
+        self.n = len(self.series)
         
     def get_standard_fluctuations(self, tau_lags, q_orders):
         """
@@ -38,7 +44,7 @@ class InverseMultifractal:
             for tau in tau_lags:
                 # Calculate differences for lag tau
                 # dX = |X(t+tau) - X(t)|
-                dX = np.abs(self.log_prices[tau:] - self.log_prices[:-tau])
+                dX = np.abs(self.series[tau:] - self.series[:-tau])
                 
                 if np.any(~np.isnan(dX)):
                     # Calculate q-th moment
@@ -80,14 +86,14 @@ class InverseMultifractal:
             t = 0
             while t < self.n - 1:
                 # Current price reference
-                ref_price = self.log_prices[t]
+                ref_price = self.series[t]
                 if np.isnan(ref_price):
                     t += 1
                     continue
                 
                 # Find the first future point where price exits [ref-delta, ref+delta]
                 # Efficient search using numpy where
-                future_prices = self.log_prices[t+1:]
+                future_prices = self.series[t+1:]
                 
                 dist = np.abs(future_prices - ref_price)
                 
@@ -134,8 +140,53 @@ class InverseMultifractal:
                 
         return results
 
+    def load_inverse_exit_times(self, conn, market, thresholds, q_orders):
+        """
+        Inverse Analysis: Fix Threshold (delta), Measure Time (tau)
+        I_q(delta) ~ delta^chi(q)
+        """
+        results = {}
+        
+        # Pre-calculate exit times for each threshold
+        # This is the computationally heavy part
+        avg_exit_moments = {q: [] for q in q_orders}
+        for ts in thresholds:
+            fhts = query_binned_data(
+                market, "1980-01-01", "2022-31-12",
+                t1_string=stringify_threshold(ts[0]), t2_string=stringify_threshold(ts[1]),
+                min_bins=-1,
+                conn=conn
+            )[0]["FHT"].values
 
-def process_single_ticker(ticker, prices, taus, deltas, qs):
+            # Calculate moments of exit times
+            for q in q_orders:
+                moment = np.mean(np.array(fhts) ** q)
+                avg_exit_moments[q].append(moment)
+
+        # Fit Log-Log to find chi(q)
+        # log(time_moment) = chi * log(delta) + C
+        for q in q_orders:
+            # Filter out NaNs
+            valid_idx = np.isfinite(avg_exit_moments[q])
+            if np.sum(valid_idx) > 2:
+                y = np.log(np.array(avg_exit_moments[q])[valid_idx])
+                x = np.log(np.array(thresholds)[valid_idx, 1])
+                slope, _, _, _, _ = stats.linregress(x, y)
+                results[q] = slope
+            else:
+                results[q] = np.nan
+                
+        return results
+
+
+def parse_arguments():
+    parser = argparse.ArgumentParser(description="Multifractality Analysis")
+    parser.add_argument('-t', '--multifractality-type', type=int, choices=[1,2,3], default=1,
+                        help='Type of Inverse Multifractal Analysis to perform (default: 1)')
+    return parser.parse_args()
+
+
+def process_single_ticker(market, prices, taus, deltas, qs, conn=None):
     """
     Worker function to calculate exponents for a single ticker.
     Returns a list of products (zeta * chi) corresponding to the q-orders.
@@ -146,7 +197,10 @@ def process_single_ticker(ticker, prices, taus, deltas, qs):
 
         # Run Calculations
         zeta_exponents = analyzer.get_standard_fluctuations(taus, qs)
-        chi_exponents = analyzer.get_inverse_exit_times(deltas, qs)
+        if conn is None:
+            chi_exponents = analyzer.get_inverse_exit_times(deltas, qs)
+        else:
+            chi_exponents = analyzer.load_inverse_exit_times(conn, market, deltas, qs)
         
         return [zeta_exponents[q] * chi_exponents[q] for q in qs]
         
@@ -155,10 +209,28 @@ def process_single_ticker(ticker, prices, taus, deltas, qs):
         return [np.nan] * len(qs)
 
 
+def select_thresholds(df_thresholds, start):
+    ends = df_thresholds[df_thresholds["Start"] == start]["End"]
+    if start > 0:
+        ends = ends[(ends > 0) & (ends < start)].sort_values()
+    else:
+        ends = ends[(ends < 0) & (ends > start)].sort_values()
+    thresholds = [(start, end) for end in ends]
+    return thresholds
+
+
 def main():
+    args = parse_arguments()
     # Setup parameters
     taus = np.unique(np.logspace(0, 2, 20).astype(int)) # Example tau
-    deltas = np.logspace(np.log10(0.0001), np.log10(0.1), 50)
+    if args.multifractality_type == 3:
+        conn = setup_optimized_connection()
+        df_experiments = list_database_thresholds(DATABASE)
+        thresholds = select_thresholds(df_experiments, START)
+    else:
+        conn = None
+        thresholds = np.logspace(np.log10(0.0001), np.log10(0.1), 50)
+
     qs = [1, 2, 3] # Example qs (ensure this is defined)
     
     results = {}
@@ -166,14 +238,17 @@ def main():
     for market in MARKETS:
         print(f"Processing Market: {market}...")
         
-        # Load data (Sequential to save RAM)
-        df = pd.read_pickle(PRICES / f"{market}.pickle")
+        if args.multifractality_type == 1:
+            # Load raw prices
+            df = pd.read_pickle(PRICES / f"{market}.pickle")
+        else:
+            # Load log-returns
+            df = pd.read_pickle(RETURNS / f"{market}_log.pickle")
         
-        # 2. Parallelize the Inner Loop
         # n_jobs=-1 uses all available CPU cores
         market_results = Parallel(n_jobs=-1)(
-            delayed(process_single_ticker)(ticker, prices, taus, deltas, qs)
-            for ticker, prices in tqdm(df.items(), desc=f"Tickers in {market}")
+            delayed(process_single_ticker)(market, prices, taus, thresholds, qs, conn)
+            for _, prices in tqdm(df.items(), desc=f"Tickers in {market}")
         )
         
         # Aggregate Results
@@ -181,9 +256,11 @@ def main():
 
     # Save final results
     final_df = pd.DataFrame.from_dict(results, orient="index", columns=[f"q{q}" for q in qs])
-    final_df.to_csv(ROOT / "data/processed/multifractality/scaling_exponents.csv")
+    final_df.to_csv(
+        ROOT / f"data/processed/multifractality/scaling_exponents_type{args.multifractality_type}.csv")
+    
     print("Done!")
-        
+
 
 if __name__ == "__main__":
     main()
