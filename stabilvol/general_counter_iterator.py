@@ -17,13 +17,14 @@ theta i |                    theta f
 ______________________________________________________________________
 """
 
-from utility.definitions import ROOT
+from stabilvol import ROOT
 from utility.classes.data_extraction import DataExtractor
 from utility.classes.stability_analysis import StabilVolter
 from single_stabilvol import print_indicators_table, get_stabilvol
 from utility.functions import list_database_thresholds
 
 import pandas as pd
+import numpy as np
 import matplotlib.pyplot as plt
 import sqlalchemy
 import argparse
@@ -37,12 +38,19 @@ END_DATE = '2022-07-01'
 CRITERION = 'percentage'
 VALUE = 0.05
 COUNTING_METHOD = 'multi'
+RETURNS_TYPE = 'log'
 
-START_LEVELS = [1.8, 1.6, 1.4, 1.2, 1.0, -1.0, -1.2, -1.4, -1.6, -1.8]
-DELTAS = [1.0, 0.8, 0.6, 0.4, 0.2, -0.2, -0.4, -0.6, -0.8, -1.0]
+# LOW RALLIES
+START_LEVELS = [-0.001, -0.002, 0.001, 0.002]
+DELTAS = np.linspace(0.01, 0.2, num=30)
+# LEVELS = {
+#     (round(start, 2), round(start+delta, 2)) for start in START_LEVELS for delta in DELTAS
+# }
 LEVELS = {
-    (round(start, 2), round(start+delta, 2)) for start in START_LEVELS for delta in DELTAS
+    (round(start, 2), round(-2*start, 2)) for start in START_LEVELS
 }
+NORMALIZED = False  # Wether or not to scale thresholds by standard deviation
+
 TAU_MAX = 30
 
 DATABASE = ROOT / 'data/interim'
@@ -94,7 +102,7 @@ def main():
     
     selection_type = 'trapezoidal_selection' if CRITERION == 'percentage' else 'rectangular_selection'
 
-    database_dir = ROOT / f'data/processed/{selection_type}/stabilvol_filtered.sqlite'
+    database_dir = ROOT / f'data/processed/{selection_type}/stabilvol_logs.sqlite'
     saved_levels = list_database_thresholds(database_dir).values.tolist()
     for i, (start_level, end_level) in enumerate(levels):
         if (start_level, end_level) in saved_levels:
@@ -105,13 +113,15 @@ def main():
         analyst = StabilVolter(
             start_level=start_level,
             end_level=end_level,
+            std_normalization=NORMALIZED,
             tau_max=TAU_MAX)
 
         for market in markets:
             print(f"\n{'-'*25}\nCounting {market} stabilvol starting at {datetime.now()}...")
             # GET STABILVOL
             start_time = datetime.now()
-            data = accountant.extract_data(DATABASE / f'{market}.pickle')
+            returns_file = DATABASE / f'{market}.pickle' if RETURNS_TYPE == 'pct_change' else DATABASE / f'{market}_log.pickle'
+            data = accountant.extract_data(returns_file)
 
             analysis_info = {'Market': market}  # Info column to add to result DataFrame
             try:
@@ -123,7 +133,7 @@ def main():
             else:
                 stabilvols.append(stabilvol)
                 # STATISTICS
-                print_indicators_table('FHT Indicators'.upper(), analyst.get_indicators(stabilvol))
+                # print_indicators_table('FHT Indicators'.upper(), analyst.get_indicators(stabilvol))
                 if PLOT_FHT:
                     analyst.plot_fht(title=f"{market} FHT")
                     plt.show()
