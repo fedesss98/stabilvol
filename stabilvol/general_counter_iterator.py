@@ -41,7 +41,7 @@ COUNTING_METHOD = 'multi'
 RETURNS_TYPE = 'log'
 
 # LOW RALLIES
-START_LEVELS = [-0.005, -0.01, -0.02, -0.1, -0.15, -0.2, -0.25, -0.3, -0.4, -0.5]
+START_LEVELS = [-0.001, -0.002, 0.001, 0.002]
 DELTAS = np.linspace(0.01, 0.2, num=30)
 # LEVELS = {
 #     (round(start, 2), round(start+delta, 2)) for start in START_LEVELS for delta in DELTAS
