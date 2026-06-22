@@ -1,0 +1,18 @@
+{
+  "description": "Very small smoke run: evaluate the parm.dat defaults on UN and one threshold pair.",
+  "markets": ["UN"],
+  "threshold_pairs": [[-0.5, -1.5]],
+  "pilot_max_paths": 16,
+  "pilot_n_steps": 300,
+  "n_vol_bins": 8,
+  "seed": 12345,
+  "correlated_noise": false,
+  "run": {
+    "evaluate_default": true,
+    "skip_full_validation": true,
+    "plot_full": false,
+    "workers": 1,
+    "output_dir": "data/processed/heston_calibration",
+    "figure_dir": "visualization/heston_calibration"
+  }
+}

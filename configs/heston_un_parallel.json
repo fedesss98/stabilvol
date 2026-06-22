@@ -1,0 +1,36 @@
+{
+  "description": "Single-market UN calibration with multiprocessing and pilot-sized plotting.",
+  "markets": ["UN"],
+  "threshold_pairs": [[-0.5, -1.5]],
+  "pilot_max_paths": 256,
+  "pilot_n_steps": 3030,
+  "full_n_steps": 11089,
+  "n_vol_bins": 20,
+  "seed": 12345,
+  "correlated_noise": false,
+  "run": {
+    "maxiter": 50,
+    "popsize": 6,
+    "workers": 10,
+    "polish": false,
+    "refine": false,
+    "quiet_progress": false,
+    "skip_full_validation": true,
+    "evaluate_default": false,
+    "plot_full": false,
+    "output_dir": "data/processed/heston_calibration",
+    "figure_dir": "visualization/heston_calibration"
+  },
+  "bounds": {
+    "aa": [0.005, 8.0]
+  },
+  "initial_params": {
+    "a": 1.863387,
+    "b": 1.7353,
+    "aa": 0.0192491,
+    "bb": 0.08777271,
+    "cc": 2.237244,
+    "rho": 0.0,
+    "vstart": 0.0069297
+  }
+}
