@@ -1,10 +1,5 @@
 from pathlib import Path
 
-# Root of the project, it should point to the stabilizing_volatility folder
-ROOT = Path(
-    'G:/UNIPA/ECONOFISICA/stabilizing_volatility'
-)
-
 # External directory containing raw stock prices to analyze
 DATA_ROOT = Path(
     'G:/UNIPA/ECONOFISICA/DATA/BLOOMBERG'

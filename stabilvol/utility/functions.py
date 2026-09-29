@@ -69,7 +69,12 @@ def numerify_threshold(t):
 
 def list_database_thresholds(database) -> pd.DataFrame:
     # Connect to the SQLite database
-    conn = sqlite3.connect(database)
+    try:
+        conn = sqlite3.connect(database)
+    except Exception as e:
+        print(f"Error while connecting to the database: {e}")
+        return 
+    
     cur = conn.cursor()
 
     # Query the database to get all table names
@@ -150,14 +155,17 @@ def select_bins(df, max_n=1000, min_n = STARTING_BINS):
 
 def query_binned_data(
         market:str, 
-        start_date:str, 
-        end_date:str = None, 
-        vol_limit:float = 0.5,
+        start_date:str | pd.Timestamp, 
+        end_date:str | pd.Timestamp | None = None, 
+        vol_limit: float = 0.5,
         tau_max:int = 30,
         t1_string:str = "m0p5", 
         t2_string:str = "m1p5", 
         conn=None,
-        raise_error:bool = True):
+        raise_error:bool = True,
+        min_fht_num = 50,
+        min_bins:int = STARTING_BINS,
+        max_bins:int = 1000):
     grouped_data = None
     conn = sqlite3.connect(DATABASE) if conn is None else conn
     end_date = '2023-01-01' if end_date is None else end_date
@@ -186,8 +194,11 @@ def query_binned_data(
             print(f'No data for market {market} with thresholds {t1_string}-{t2_string} from {start_date} to {end_date}')
             return pd.DataFrame(), 0
     else:
-        if len(df) > 50:
-            return select_bins(df)
+        if len(df) > min_fht_num:
+            if min_bins < 1:
+                return df, -1
+            else:
+                return select_bins(df, max_n=max_bins, min_n=min_bins)
         else:
             raise ValueError(f'Not enough data for market {market} with thresholds {t1_string}-{t2_string} from {start_date} to {end_date}')
 
@@ -301,7 +312,7 @@ def plot_rolling_pmesh(coefficients, windows, values, **kwargs):
     return fig, outcasts
 
 
-def format_mfht_directory(selection_criterion, volatility):
+def format_mfht_directory(selection_criterion, volatility, string_id=''):
     # Convert the number to a float to ensure proper handling
     num = float(volatility)
     
@@ -321,21 +332,48 @@ def format_mfht_directory(selection_criterion, volatility):
         result = int_str
     
     # Return the final string with 'vol' prefix
-    return f"data/processed/{selection_criterion}_selection/vol{result}"
+    if string_id:
+        dir = f"data/processed/{selection_criterion}_selection/vol{result}_{string_id}"
+    else:
+        dir = f"data/processed/{selection_criterion}_selection/vol{result}"
+    return dir
 
 
-def roll_windows(duration=90,  start_date=None, end_date=None):
+def roll_windows(duration=90,  start_date=None, end_date=None, frequency='D'):
     # Define the start and end dates
-    start_date = datetime.date(1980, 1, 1) if start_date is None else start_date
-    end_date = datetime.date(2022, 7, 1) if end_date is None else end_date
+    if start_date is None:
+        start_date = datetime.date(1980, 1, 1)
+    elif isinstance(start_date, str):
+        start_date = pd.to_datetime(start_date).date()
+    
+    if end_date is None:
+        end_date = datetime.date(2022, 7, 1)
+    elif isinstance(end_date, str):
+        end_date = pd.to_datetime(end_date).date()
     
     half_win_len = pd.to_timedelta(duration//2, 'D')
     start = start_date + half_win_len
     end = end_date - half_win_len
-    centers = pd.date_range(start, end, freq='D')
+    centers = pd.date_range(start, end, freq=frequency)
     return [(mid - half_win_len, mid + half_win_len) for mid in centers]
 
 
+def setup_optimized_connection(database_path):
+    """Setup an optimized SQLite connection"""
+    conn = sqlite3.connect(database_path)
+    # SQLite optimizations
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL") 
+    conn.execute("PRAGMA cache_size=100000")  # Increase cache
+    conn.execute("PRAGMA temp_store=MEMORY")
+    return conn
+
+
 if __name__ == "__main__":
-    database = "../../data/processed/trapezoidal_selection/stabilvol.sqlite"
+    database = "../../data/processed/trapezoidal_selection/stabilvol_filtered.sqlite"
     list_database_thresholds(database)
+    conn = sqlite3.connect(database)
+    df, _ = query_binned_data(market="UN", start_date="2008-01-01", min_bins=0, conn=conn)
+    print(df.columns)
+    df, _ = query_binned_data(market="UN", start_date="2008-01-01", min_bins=10, conn=conn)
+    print(df.columns)

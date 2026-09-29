@@ -11,6 +11,9 @@ visualization/
 # Project files
 .idea/
 
+# Old Heston simulations scripts
+simulation_tau_vs_noise/
+
 # Created by https://www.toptal.com/developers/gitignore/api/pycharm,python
 # Edit at https://www.toptal.com/developers/gitignore?templates=pycharm,python
 

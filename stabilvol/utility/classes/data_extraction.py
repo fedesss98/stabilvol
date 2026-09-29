@@ -20,11 +20,12 @@ except ModuleNotFoundError:
 
 try:
     from stabilvol.utility.classes.data_inspection import Window
-    from stabilvol.utility.definitions import ROOT, MARKETS_STATS
+    from stabilvol.utility.definitions import MARKETS_STATS
+    from stabilvol import ROOT
 except ModuleNotFoundError as e:
     logging.debug(f"Error in data_extraction: {e}")
     from .data_inspection import Window
-    from utility.definitions import ROOT
+    from stabilvol import ROOT
 
 
 class DataExtractor:
