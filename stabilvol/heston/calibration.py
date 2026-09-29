@@ -58,6 +58,7 @@ class CalibrationConfig:
     bounds: dict[str, tuple[float, float]] = field(default_factory=lambda: dict(DEFAULT_BOUNDS))
     base_params: HestonParams = field(default_factory=HestonParams)
     count_method: str = "quiet_pandas"
+    std_normalization: bool = True
     correlated_noise: bool = False
 
     def __post_init__(self) -> None:
@@ -222,7 +223,7 @@ class HestonCalibrator:
         analyst = StabilVolter(
             start_level=threshold_pair[0],
             end_level=threshold_pair[1],
-            std_normalization=True,
+            std_normalization=self.config.std_normalization,
             tau_min=self.config.tau_min,
             tau_max=self.config.tau_max,
         )

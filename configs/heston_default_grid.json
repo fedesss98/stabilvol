@@ -14,6 +14,7 @@
   "n_vol_bins": 40,
   "empty_penalty": 10.0,
   "seed": 12345,
+  "std_normalization": true,
   "correlated_noise": false,
   "base_params": {
     "a": 2.0,

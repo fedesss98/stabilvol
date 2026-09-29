@@ -141,6 +141,11 @@ def build_config(args: argparse.Namespace, config_data: dict) -> CalibrationConf
         bounds=bounds,
         base_params=base_params,
         count_method=config_data.get("count_method", defaults.count_method),
+        std_normalization=(
+            args.std_normalization
+            if getattr(args, "std_normalization", None) is not None
+            else config_data.get("std_normalization", defaults.std_normalization)
+        ),
         correlated_noise=(
             args.correlated_noise
             if getattr(args, "correlated_noise", None) is not None
@@ -356,6 +361,8 @@ def main() -> None:
     parser.add_argument("--full-steps", type=int)
     parser.add_argument("--vol-bins", type=int)
     parser.add_argument("--seed", type=int)
+    parser.add_argument("--std-normalization", action="store_true", default=None, help="Scale simulated FHT thresholds by the simulated return standard deviation")
+    parser.add_argument("--no-std-normalization", dest="std_normalization", action="store_false", help="Use raw simulated FHT thresholds")
     parser.add_argument("--correlated-noise", action="store_true", default=None)
     parser.add_argument("--uncorrelated-noise", dest="correlated_noise", action="store_false")
     parser.add_argument("--maxiter", type=int)
@@ -396,6 +403,7 @@ def main() -> None:
     print(f"  mode: {mode}")
     print(f"  markets: {', '.join(config.markets)}")
     print(f"  thresholds: {format_threshold_pairs(config.threshold_pairs)}")
+    print(f"  std_normalization: {config.std_normalization}")
     print("  loss_metric: mean two-sample KS statistic over FHT distributions")
     print(f"  noise: {'correlated' if config.correlated_noise else 'uncorrelated'}")
     print(f"  optimized_parameters: {', '.join(calibrator.parameter_names())}")

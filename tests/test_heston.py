@@ -1,5 +1,6 @@
 import unittest
 from argparse import Namespace
+from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
@@ -56,6 +57,17 @@ class HestonCountingTests(unittest.TestCase):
         stabilvol = calibrator.count_simulated_events(data, (-0.5, -1.5), "SIM")
         self.assertEqual(len(stabilvol), 2)
         self.assertTrue((stabilvol["FHT"] == 3).all())
+
+    def test_simulated_count_uses_configured_std_normalization(self):
+        data = pd.DataFrame({"a": [0.0, -0.6, -1.6]}, index=pd.date_range("2000-01-01", periods=3))
+        config = CalibrationConfig(root=".", threshold_pairs=((-0.5, -1.5),), count_method="pandas", std_normalization=False)
+        calibrator = HestonCalibrator(config)
+
+        with patch("stabilvol.heston.calibration.StabilVolter") as stabilvolter:
+            stabilvolter.return_value.get_stabilvol.return_value = pd.DataFrame()
+            calibrator.count_simulated_events(data, (-0.5, -1.5), "SIM")
+
+        self.assertFalse(stabilvolter.call_args.kwargs["std_normalization"])
 
     def test_threshold_signs_use_existing_stabilvolter_behavior(self):
         index = pd.date_range("2000-01-01", periods=5, freq="D")
@@ -116,6 +128,7 @@ class HestonCalibrationTests(unittest.TestCase):
             full_steps=None,
             vol_bins=None,
             seed=None,
+            std_normalization=None,
         )
         config = build_config(args, {"bounds": {"aa": [0.005, 8.0]}})
         calibrator = HestonCalibrator(config)
@@ -137,11 +150,32 @@ class HestonCalibrationTests(unittest.TestCase):
             full_steps=None,
             vol_bins=None,
             seed=None,
+            std_normalization=None,
         )
         config = build_config(args, {"correlated_noise": True})
         calibrator = HestonCalibrator(config)
         self.assertIn("rho", calibrator.parameter_names())
         self.assertEqual(len(calibrator.bounds_sequence()), 7)
+
+    def test_config_controls_std_normalization(self):
+        args = Namespace(
+            database=None,
+            threshold_pair=None,
+            markets=None,
+            start_date=None,
+            end_date=None,
+            vol_limit=None,
+            tau_min=None,
+            tau_max=None,
+            pilot_paths=None,
+            pilot_steps=None,
+            full_steps=None,
+            vol_bins=None,
+            seed=None,
+            std_normalization=None,
+        )
+        config = build_config(args, {"std_normalization": False})
+        self.assertFalse(config.std_normalization)
 
 
 if __name__ == "__main__":

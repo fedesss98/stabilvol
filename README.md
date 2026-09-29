@@ -133,6 +133,7 @@ Default calibration choices:
 - empirical target: `data/processed/trapezoidal_selection/stabilvol_filtered.sqlite`;
 - markets: `UN`, `UW`, `LN`, `JT`;
 - thresholds: `(-0.5, -1.5)`, `(-1.0, -2.0)`, `(0.5, 1.5)`, `(1.0, 2.0)`;
+- simulated FHT threshold normalization: `std_normalization = true`; set `"std_normalization": false` in the JSON config or pass `--no-std-normalization` to use raw thresholds;
 - loss target: mean two-sample Kolmogorov-Smirnov statistic between empirical and simulated FHT distributions, averaged across configured threshold pairs and ignoring volatility;
 - optimized parameters by default: `a`, `b`, `aa`, `bb`, `cc`, and `vstart`; `rho` is optimized only if `correlated_noise` is explicitly set to `true`;
 - pilot optimization: `min(512, n_market_stocks)` paths and 3030 steps;
