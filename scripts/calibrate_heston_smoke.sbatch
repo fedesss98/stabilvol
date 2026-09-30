@@ -9,37 +9,18 @@
 
 set -euo pipefail
 
-repo_root="${HESTON_PROJECT_ROOT:-${SLURM_SUBMIT_DIR:-$(pwd)}}"
+repo_root="/data/qmla/famato/stabilvol"
 cd "$repo_root"
-python_bin="${HESTON_PYTHON:-python3}"
-database="${HESTON_DATABASE:-data/processed/trapezoidal_selection/stabilvol_filtered.sqlite}"
-job_id="${SLURM_JOB_ID:-manual}"
+job_id="$SLURM_JOB_ID"
 
-if [[ ! -f scripts/calibrate_heston.py || ! -f configs/heston_quick.json ]]; then
-    echo "Submit from the repository root or set HESTON_PROJECT_ROOT." >&2
-    exit 2
-fi
-if ! command -v "$python_bin" >/dev/null 2>&1; then
-    echo "Python executable unavailable: $python_bin (set HESTON_PYTHON)." >&2
-    exit 2
-fi
-if [[ ! -r "$database" || ! -r data/interim/UN.pickle ]]; then
-    echo "Missing/read-protected database or data/interim/UN.pickle." >&2
-    echo "Database: $database" >&2
-    exit 2
-fi
+HESTON_CONFIG="$repo_root/configs/heston_quick.json"
+HESTON_DATABASE="$repo_root/data/processed/trapezoidal_selection/stabilvol_filtered.sqlite"
+HESTON_OUTPUT_ROOT="$repo_root/data/processed/heston_calibration"
+HESTON_FIGURE_ROOT="$repo_root/visualization/heston_calibration"
 
-export MPLBACKEND=Agg
-export MPLCONFIGDIR="${SLURM_TMPDIR:-${TMPDIR:-/tmp}}/heston-smoke-mpl-${job_id}"
-export OMP_NUM_THREADS=1
-export OPENBLAS_NUM_THREADS=1
-export MKL_NUM_THREADS=1
-export NUMEXPR_NUM_THREADS=1
-mkdir -p "$MPLCONFIGDIR"
-
-echo "Heston smoke test: job=$job_id database=$database python=$python_bin"
-"$python_bin" -u scripts/calibrate_heston.py \
-    --config-json configs/heston_quick.json \
-    --database "$database" \
-    --output-dir "data/processed/heston_calibration/smoke-$job_id" \
-    --figure-dir "visualization/heston_calibration/smoke-$job_id"
+echo "Heston smoke test: job=$job_id database=$HESTON_DATABASE"
+uv run python scripts/calibrate_heston.py \
+    --config-json "$HESTON_CONFIG" \
+    --database "$HESTON_DATABASE" \
+    --output-dir "$HESTON_OUTPUT_ROOT/smoke-$job_id" \
+    --figure-dir "$HESTON_FIGURE_ROOT/smoke-$job_id"
