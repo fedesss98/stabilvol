@@ -1,0 +1,15 @@
+&parm
+   soglia=-6.0, start=0.0, Vstart=8.62e-5, dt=0.01, a=2.00, b=3.00, 
+   Dmin=0.1, Dmax=100.1, rho=0.0, numeventi=1071, nexp_2=10000
+   aa=2.00, bb=0.01, cc=0.83, npt=1, factor=2.0, sstart2=-0.1, sfinish2=-1.0
+ &end  
+
+if(x.lt.soglia) then
+   x=start
+end if
+
+
+
+
+
+

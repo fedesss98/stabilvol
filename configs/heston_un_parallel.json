@@ -6,6 +6,7 @@
   "pilot_n_steps": 3030,
   "full_n_steps": 11089,
   "n_vol_bins": 20,
+  "loss_metric": "mfht_curve",
   "seed": 12345,
   "std_normalization": false,
   "correlated_noise": false,

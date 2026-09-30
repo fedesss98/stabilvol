@@ -5,6 +5,7 @@
   "pilot_max_paths": 16,
   "pilot_n_steps": 300,
   "n_vol_bins": 8,
+  "loss_metric": "mfht_curve",
   "seed": 12345,
   "std_normalization": true,
   "correlated_noise": false,

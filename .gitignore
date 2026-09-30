@@ -1,5 +1,7 @@
 # Ignore data files
 data/
+heston-*.out
+heston-*.err
 static/
 
 # Ignore ipynb checkpoints

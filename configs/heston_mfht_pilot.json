@@ -1,0 +1,27 @@
+{
+  "description": "First UN MFHT-curve optimization on one threshold pair; inspect before the four-market grid.",
+  "markets": ["UN"],
+  "threshold_pairs": [[-0.5, -1.5]],
+  "loss_metric": "mfht_curve",
+  "std_normalization": true,
+  "correlated_noise": false,
+  "pilot_max_paths": 128,
+  "pilot_n_steps": 3030,
+  "n_vol_bins": 24,
+  "min_empirical_bin_events": 20,
+  "min_simulated_bin_events": 5,
+  "event_count_weight": 0.1,
+  "seed": 12345,
+  "run": {
+    "maxiter": 5,
+    "popsize": 4,
+    "workers": 8,
+    "polish": false,
+    "refine": false,
+    "skip_full_validation": true,
+    "evaluate_default": false,
+    "plot_full": false,
+    "output_dir": "data/processed/heston_calibration",
+    "figure_dir": "visualization/heston_calibration"
+  }
+}

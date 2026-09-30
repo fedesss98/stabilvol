@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Calibrate the modified Heston simulator against empirical FHT distributions."""
+"""Calibrate modified Heston parameters against empirical MFHT curves."""
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ import numpy as np
 import pandas as pd
 
 from stabilvol.heston import CalibrationConfig, HestonCalibrator, HestonParams, SimulationConfig, simulate_modified_heston
-from stabilvol.heston.calibration import moments_frame
+from stabilvol.heston.calibration import config_to_record, moments_frame
 
 
 def parse_threshold_pair(value: str) -> tuple[float, float]:
@@ -112,6 +112,10 @@ def estimated_differential_evolution_evaluations(maxiter: int, popsize: int, n_p
 def build_config(args: argparse.Namespace, config_data: dict) -> CalibrationConfig:
     defaults = CalibrationConfig()
     base_params = HestonParams(**config_data.get("base_params", {}))
+    initial_params = (
+        base_params.update(**config_data["initial_params"])
+        if "initial_params" in config_data else None
+    )
     bounds = dict(defaults.bounds)
     for key, value in config_data.get("bounds", {}).items():
         bounds[key] = tuple(value)
@@ -137,9 +141,13 @@ def build_config(args: argparse.Namespace, config_data: dict) -> CalibrationConf
         n_vol_bins=args.vol_bins if args.vol_bins is not None else config_data.get("n_vol_bins", defaults.n_vol_bins),
         event_count_weight=config_data.get("event_count_weight", defaults.event_count_weight),
         empty_penalty=config_data.get("empty_penalty", defaults.empty_penalty),
+        min_empirical_bin_events=config_data.get("min_empirical_bin_events", defaults.min_empirical_bin_events),
+        min_simulated_bin_events=config_data.get("min_simulated_bin_events", defaults.min_simulated_bin_events),
+        loss_metric=args.loss_metric if getattr(args, "loss_metric", None) is not None else config_data.get("loss_metric", defaults.loss_metric),
         seed=args.seed if args.seed is not None else config_data.get("seed", defaults.seed),
         bounds=bounds,
         base_params=base_params,
+        initial_params=initial_params,
         count_method=config_data.get("count_method", defaults.count_method),
         std_normalization=(
             args.std_normalization
@@ -301,20 +309,33 @@ def plot_market_comparisons(
         empirical = calibrator.load_empirical_events(market, pair)
         simulated = calibrator.count_simulated_events(simulation.returns, pair, market)
         event_pairs[pair] = (empirical, simulated)
-        if simulated.empty:
-            continue
+        start = str(pair[0]).replace("-", "m").replace(".", "p")
+        end = str(pair[1]).replace("-", "m").replace(".", "p")
+        if calibrator.config.loss_metric == "mfht_curve":
+            target = calibrator.prepare_curve_target(empirical)
+            comparison = calibrator.curve_comparison(target, simulated)
+            comparison.to_csv(output_dir / f"{market}_{start}_{end}_mfht.csv", index=False)
+            vol_edges = target.edges
+            x = comparison["volatility_midpoint"]
+            empirical_x, empirical_y = x[comparison["fit_bin"]], comparison.loc[comparison["fit_bin"], "empirical_mfht"]
+            simulated_x, simulated_y = x[comparison["simulated_bin_covered"]], comparison.loc[comparison["simulated_bin_covered"], "simulated_mfht"]
+        else:
+            if simulated.empty:
+                continue
+            vol_cap = max(
+                float(empirical["Volatility"].quantile(0.995)),
+                float(simulated["Volatility"].quantile(0.995)),
+                np.finfo(float).eps,
+            )
+            vol_edges = np.linspace(0.0, vol_cap, calibrator.config.n_vol_bins + 1)
+            empirical_mfht = bin_mfht(empirical, vol_edges)
+            simulated_mfht = bin_mfht(simulated, vol_edges)
+            empirical_x, empirical_y = empirical_mfht["left"], empirical_mfht["mean"]
+            simulated_x, simulated_y = simulated_mfht["left"], simulated_mfht["mean"]
 
-        vol_cap = max(
-            float(empirical["Volatility"].quantile(0.995)),
-            float(simulated["Volatility"].quantile(0.995)),
-            np.finfo(float).eps,
-        )
-        vol_edges = np.linspace(0.0, vol_cap, calibrator.config.n_vol_bins + 1)
         fht_edges = np.arange(calibrator.config.tau_min, calibrator.config.tau_max + 2)
         empirical_hist, _, _ = np.histogram2d(empirical["Volatility"], empirical["FHT"], bins=[vol_edges, fht_edges])
         simulated_hist, _, _ = np.histogram2d(simulated["Volatility"], simulated["FHT"], bins=[vol_edges, fht_edges])
-        empirical_mfht = bin_mfht(empirical, vol_edges)
-        simulated_mfht = bin_mfht(simulated, vol_edges)
 
         fig, axs = plt.subplots(1, 3, figsize=(15, 4), layout="constrained")
         vmax = max(empirical_hist.max(), simulated_hist.max(), 1)
@@ -322,16 +343,14 @@ def plot_market_comparisons(
         axs[0].set_title("Empirical")
         axs[1].imshow(simulated_hist.T, aspect="auto", origin="lower", vmax=vmax)
         axs[1].set_title("Simulated")
-        axs[2].plot(empirical_mfht["left"], empirical_mfht["mean"], label="Empirical")
-        axs[2].plot(simulated_mfht["left"], simulated_mfht["mean"], label="Simulated")
+        axs[2].plot(empirical_x, empirical_y, label="Empirical")
+        axs[2].plot(simulated_x, simulated_y, label="Simulated")
         axs[2].set_title("MFHT projection")
         axs[2].set_xlabel("Volatility")
         axs[2].set_ylabel("FHT")
         axs[2].legend()
         fig.suptitle(f"{market} thresholds {pair[0]} -> {pair[1]}")
 
-        start = str(pair[0]).replace("-", "m").replace(".", "p")
-        end = str(pair[1]).replace("-", "m").replace(".", "p")
         fig.savefig(output_dir / f"{market}_{start}_{end}.png", dpi=180)
         plt.close(fig)
 
@@ -360,6 +379,8 @@ def main() -> None:
     parser.add_argument("--pilot-steps", type=int)
     parser.add_argument("--full-steps", type=int)
     parser.add_argument("--vol-bins", type=int)
+    parser.add_argument("--loss-metric", choices=("mfht_curve", "fht_distribution"),
+                        help="Objective to optimize; default is the MFHT-versus-volatility curve")
     parser.add_argument("--seed", type=int)
     parser.add_argument("--std-normalization", action="store_true", default=None, help="Scale simulated FHT thresholds by the simulated return standard deviation")
     parser.add_argument("--no-std-normalization", dest="std_normalization", action="store_false", help="Use raw simulated FHT thresholds")
@@ -387,10 +408,24 @@ def main() -> None:
     config_data = load_json_config(args.config_json) if args.config_json else {}
     run_options = build_run_options(args, config_data)
     config = build_config(args, config_data)
+    if not config.absolute_database_path.is_file():
+        parser.error(f"empirical FHT database not found: {config.absolute_database_path}")
+    for market in config.markets:
+        returns_path = config.root / "data" / "interim" / f"{market}.pickle"
+        if not returns_path.is_file():
+            parser.error(f"market returns file not found: {returns_path}")
     calibrator = HestonCalibrator(config)
     run_options.output_dir.mkdir(parents=True, exist_ok=True)
     run_options.figure_dir.mkdir(parents=True, exist_ok=True)
     run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+    manifest_path = run_options.output_dir / f"heston_calibration_config_{run_id}.json"
+    with manifest_path.open("w", encoding="utf-8") as handle:
+        json.dump(
+            {"calibration": config_to_record(config), "run": vars(run_options)},
+            handle,
+            indent=2,
+            default=str,
+        )
     run_start = time.perf_counter()
     mode = "evaluate-default" if run_options.evaluate_default else "optimize"
 
@@ -404,11 +439,12 @@ def main() -> None:
     print(f"  markets: {', '.join(config.markets)}")
     print(f"  thresholds: {format_threshold_pairs(config.threshold_pairs)}")
     print(f"  std_normalization: {config.std_normalization}")
-    print("  loss_metric: mean two-sample KS statistic over FHT distributions")
+    print(f"  loss_metric: {config.loss_metric}")
     print(f"  noise: {'correlated' if config.correlated_noise else 'uncorrelated'}")
     print(f"  optimized_parameters: {', '.join(calibrator.parameter_names())}")
     print(f"  database: {config.absolute_database_path}")
     print(f"  output_dir: {run_options.output_dir}")
+    print(f"  effective_config: {manifest_path}")
     print(f"  figure_dir: {run_options.figure_dir}")
     print(
         "  pilot: "
@@ -498,7 +534,7 @@ def main() -> None:
             {
                 "run_id": run_id,
                 "mode": mode,
-                "loss_metric": "mean_ks_2samp_fht_statistic",
+                "loss_metric": config.loss_metric,
                 "correlated_noise": config.correlated_noise,
                 "optimized_parameters": ",".join(calibrator.parameter_names()),
                 "config_json": str(args.config_json) if args.config_json else None,
@@ -521,7 +557,7 @@ def main() -> None:
             {
                 "run_id": run_id,
                 "market": market,
-                "loss_metric": "mean_ks_2samp_fht_statistic",
+                "loss_metric": config.loss_metric,
                 "correlated_noise": config.correlated_noise,
                 "optimized_parameters": ",".join(calibrator.parameter_names()),
                 "config_json": str(args.config_json) if args.config_json else None,

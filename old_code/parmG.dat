@@ -1,0 +1,7 @@
+ &parm
+  sstart=-0.1, sstart2=100.0,sfinish=-1.5, numstock=1071, rit_anom=100.0, taumin=2.0
+  sigma_max=0.2, num_bin=5000
+ &end
+
+
+

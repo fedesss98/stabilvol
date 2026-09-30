@@ -12,6 +12,9 @@ The project works mostly with Bloomberg market return data stored as pandas pick
 - `stabilvol/general_counter_iterator.py`: legacy script for sweeping threshold pairs and writing one SQLite table per pair.
 - `stabilvol/bin_mfht.py`: bins FHT rows from SQLite into MFHT pickle files.
 - `stabilvol/heston/`: Python port of the modified Heston simulator and calibration tools.
+- `scripts/reproduce_heston_paper.py`: fixed-parameter theoretical simulation and diagnostics for Valenti et al. (2018), without an empirical database.
+- `scripts/reproduce_heston_paper.sbatch`: Slurm job for that theoretical simulation; array indices can run independent seeds.
+- `scripts/summarize_heston_paper.py`: combine completed seed-array runs into mean MFHT curves and a seed summary.
 - `scripts/calibrate_heston.py`: CLI for fitting Heston parameters to empirical FHT distributions.
 - `notebooks/11-mfht-grid.ipynb`: exploratory MFHT grid notebook. It loads/bins FHT data, caches MFHT pickles, and builds grid, peak, and resistance-band plots.
 - `notebooks/20-filter-fht.ipynb`: filters the main FHT database into `stabilvol_filtered.sqlite`, which notebook 11 currently uses.
@@ -80,9 +83,36 @@ It currently:
 
 The notebook is exploratory and contains some stale cells/output. In the current saved state, one cell errors because table `stabilvol_0p5_0p4` is missing, and another refers to undefined `log_binning`; the maintained notebook-local binning helper is `optimized_binning`.
 
+## Reproducing the Paper's Theoretical Model
+
+Valenti, Fazio, and Spagnolo, [*Stabilizing effect of volatility in financial markets*](https://doi.org/10.1103/PhysRevE.97.062307), compare empirical curves with a **fixed-parameter simulation** of their nonlinear Heston model. That is a separate task from fitting model parameters to this repository's four-market SQLite database.
+
+The paper uses Eqs. (5) and (6), with `U(x) = 2x^3 + 3x^2`, independent price/variance shocks, variance parameters `a=2`, `b=0.01`, `c=0.83`, `vstart=8.62e-5`, and `x0=0`. It generates 1071 return series of 3030 steps. Crash thresholds are `(-0.1, -1.5)` and rally thresholds `(0.1, 1.5)`, each multiplied by the mean of the per-series return standard deviations. The key outputs are theoretical MFHT-versus-local-volatility curves (Figs. 2(a) and 3(a)), followed by FHT, return, event-volatility, and autocorrelation diagnostics (Figs. 4(b), 5, and 6).
+
+Run this without any SQLite database:
+
+```bash
+python scripts/reproduce_heston_paper.py
+```
+
+Results go to `data/processed/heston_paper/`: figure PNGs, binned MFHT CSVs, event CSVs, autocorrelation CSV, and `summary.json`. This runs the paper's **fixed parameters**, without optimization or an empirical SQLite database. The default `--method fortran` ports the uploaded `old_code/heston.f`, `old_code/calmG.f`, `parm.dat`, and `parmG.dat` numerical conventions: `dt=0.01`, reset below `x=-6`, redraw negative variance proposals, zero the first saved return, use population standard deviations for normalization and local volatility, count FHTs from 2 through 300 steps, and compute event volatility from returns after the start through the terminal crossing. The Fortran counter carries its sums and duration across crossings discarded by the FHT range filter; the port preserves that behavior. The supplied `calmG.f` handles crashes; rally counting applies the same rules to sign-reversed returns, an inference because no rally-specific original counter was supplied.
+
+**Volatility-axis issue in the original Fortran:** `parmG.dat` gives `delta = sigma_max/num_bin = 0.2/5000 = 0.00004`; `calmG.f` assigns events to bin `i` using this width but writes `i*delta/2` as the x coordinate. Thus the published-style MFHT axis is approximately half the physical event volatility. The default script saves both `fig2a_fig3a_theoretical_mfht.png` on the original reported axis and `mfht_corrected_volatility_axis.png` on a physical axis. Each MFHT CSV contains the reported coordinate and the true lower/upper bin limits. `--method clean` uses the earlier repository counter and a physically labeled axis; `--bins` and `--include-end-in-volatility` apply only to that method.
+
+For Slurm, after creating a Linux environment with `requirements-heston.txt`, submit from the repository root:
+
+```bash
+export HESTON_PYTHON="$PWD/.venv/bin/python"
+sbatch scripts/reproduce_heston_paper.sbatch
+```
+
+The job defaults to one 1071-by-3030 realization and writes under `data/processed/heston_paper/<job ID>/seed-<seed>/`. To assess variation across seeds, submit `sbatch --array=0-9%5 scripts/reproduce_heston_paper.sbatch`; the seed is `HESTON_PAPER_BASE_SEED` (default 12345) plus the array index. After all tasks finish, run `python scripts/summarize_heston_paper.py data/processed/heston_paper/<job ID>` to save cross-seed MFHT curves and parameter summaries. Each task requests one CPU, 8 GB, and one hour. Set `HESTON_PROJECT_ROOT` when submitting outside the repository root or `HESTON_PAPER_OUTPUT_ROOT` for another output location.
+
+**Current comparison:** seed 12345 gives mean per-series return standard deviation `0.023805`, close to the paper's `0.02383`. The Fortran-style crash and rally MFHT peaks are at reported coordinates `0.00584` and `0.00638`, with heights `94.2` and `92.4` steps, close to the peaks shown around `0.006` and 90–100 steps in Figs. 2(a) and 3(a). Their physical bin centers are `0.01166` and `0.01274`. The pooled return standard deviation is `0.02406` versus the paper's `0.024`, while skewness and kurtosis for this seed are `-1.06` and `67.2` versus the paper's `-1.96` and `105`; those higher moments remain sensitive to random realization and the original custom Fortran RNG. The Python and Fortran generators are therefore not expected to produce identical paths. The MFHT peak agreement is a comparison of the analysis convention, not a bit-for-bit replay.
+
 ## Modified Heston Calibration
 
-The old Fortran code uploaded in `simulation_tau_vs_noise/` has been ported into `stabilvol/heston/`.
+The original Fortran sources and parameter files supplied by the user are in `old_code/`. The modified Heston simulator is in `stabilvol/heston/`; the paper-specific Fortran event counter is ported in `stabilvol/heston/paper_reproduction.py`.
 
 The simulator implements:
 
@@ -94,39 +124,90 @@ V[t+1] = V[t] + aa*(bb - V[t])*dt + cc*sqrt(V[t]*dt)*Z_vol
 
 By default, parameters mirror `simulation_tau_vs_noise/parm.dat`. Negative variance proposals are redrawn up to 500 times, matching the active Fortran behavior. The calibration workflow uses uncorrelated price/variance shocks by default, matching the active old Fortran lines; in this mode `rho` is fixed from `base_params` and is not optimized.
 
+Run these commands from the repository root with the project environment activated. The old `MPLCONFIGDIR=/tmp` prefix only selected Matplotlib's writable cache directory; it did not change the working directory, and `/tmp` is not required. On Windows PowerShell, activate with `.\.venv\Scripts\Activate.ps1`; on Linux, use `source .venv/bin/activate`. The examples below use Bash line continuations; in PowerShell, put each command on one line. First provide `data/processed/trapezoidal_selection/stabilvol_filtered.sqlite` (or pass `--database /path/to/your.sqlite`). This processed database is not included in the repository.
+
 Run a cheap pipeline smoke test with the default Fortran parameters:
 
 ```bash
-MPLCONFIGDIR=/tmp .venv/bin/python scripts/calibrate_heston.py \
+python scripts/calibrate_heston.py \
   --config-json configs/heston_quick.json
 ```
 
 Run a first parallel calibration on `UN`:
 
 ```bash
-MPLCONFIGDIR=/tmp .venv/bin/python scripts/calibrate_heston.py \
-  --config-json configs/heston_un_parallel.json
+python scripts/calibrate_heston.py \
+  --config-json configs/heston_mfht_pilot.json
 ```
 
 Run calibration over the default four-market, four-threshold grid:
 
 ```bash
-MPLCONFIGDIR=/tmp .venv/bin/python scripts/calibrate_heston.py \
+python scripts/calibrate_heston.py \
   --config-json configs/heston_default_grid.json
 ```
 
 The JSON files under `configs/` are the recommended way to run the workflow. Command-line flags override the config for one run, so this is valid:
 
 ```bash
-MPLCONFIGDIR=/tmp .venv/bin/python scripts/calibrate_heston.py \
-  --config-json configs/heston_un_parallel.json \
+python scripts/calibrate_heston.py \
+  --config-json configs/heston_mfht_pilot.json \
   --workers 8 \
   --maxiter 20
 ```
 
-For optimizer multiprocessing, set `run.workers` in the config or pass `--workers N`; `--workers -1` uses all available cores. Start conservatively, because each worker holds simulated returns and empirical FHT data in memory.
+For optimizer multiprocessing, set `run.workers` in the config or pass `--workers N`; `--workers -1` uses all available cores. Empirical FHT data is loaded once per worker rather than sent with every candidate, but each worker still needs memory for its own simulation and data. Start conservatively.
 
-The script writes fitted parameters and loss summaries to `data/processed/heston_calibration/`, and comparison plots to `visualization/heston_calibration/`. For each market it saves the diagnostic 2D empirical-vs-synthetic histogram/MFHT plots, a return-density overlay named `<MARKET>_returns_pdf.png`, and an FHT-density overlay named `<MARKET>_fht_pdf.png`. The CSV outputs also include empirical and synthetic return moments: mean, variance, skewness, and kurtosis.
+`base_params` sets fixed simulation parameters and the evaluate-default point. If `initial_params` is supplied, its optimized coordinates replace one member of the differential-evolution starting population; it does not constrain the fit.
+
+### Slurm cluster run
+
+The supplied [Slurm array job](scripts/calibrate_heston.sbatch) assigns one market to each array task (`0=UN`, `1=UW`, `2=LN`, `3=JT`). Each task uses its allocated CPUs for the differential-evolution population. The template requests 8 CPUs, 64 GB, and 24 hours per task, with at most two tasks running together; adjust these headers to your cluster's limits and observed memory/time. It uses one node per task and does not require MPI.
+
+On a Linux cluster, stage the repository plus the market pickles under `data/interim/` and the processed FHT SQLite file. Build a Linux environment there (do not copy the Windows `.venv`):
+
+```bash
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements-heston.txt
+```
+
+If the SQLite file is already on the cluster, point `HESTON_DATABASE` at its absolute path. The calibration also needs `data/interim/UN.pickle` for its smoke test and `UN.pickle`, `UW.pickle`, `LN.pickle`, and `JT.pickle` for the four-market job; these are ignored by Git. Submit the cheap one-CPU smoke job before optimization:
+
+```bash
+export HESTON_PYTHON="$PWD/.venv/bin/python"
+export HESTON_DATABASE="/absolute/path/to/stabilvol_filtered.sqlite"
+sbatch scripts/calibrate_heston_smoke.sbatch
+```
+
+It evaluates the fixed default parameters on a small UN sample, checks that the configured empirical table is readable, and writes isolated results under `data/processed/heston_calibration/smoke-<job ID>/`. A successful smoke test checks the pipeline, not the quality of a fitted model.
+
+For a first **MFHT-curve optimization** on UN and one threshold pair, use the bounded pilot config after the smoke job succeeds:
+
+```bash
+export HESTON_CONFIG=configs/heston_mfht_pilot.json
+sbatch --array=0 scripts/calibrate_heston.sbatch
+```
+
+Review its `UN_m0p5_m1p5_mfht.csv` and plot, plus pilot loss and event counts, before increasing paths, steps, threshold pairs, or markets. The pilot uses 128 simulated paths, 3030 steps, five differential-evolution generations, and eight workers. It skips full validation; the broader default-grid job includes a separate validation simulation.
+
+Then submit from the repository root, passing the environment's Python explicitly:
+
+```bash
+export HESTON_PYTHON="$PWD/.venv/bin/python"
+sbatch scripts/calibrate_heston.sbatch
+```
+
+To run only UN, use `sbatch --array=0 scripts/calibrate_heston.sbatch`. Override the defaults with `HESTON_CONFIG`, `HESTON_DATABASE`, `HESTON_OUTPUT_ROOT`, or `HESTON_FIGURE_ROOT` in the submission environment; relative paths are resolved from the repository root. Submit from that root, or set `HESTON_PROJECT_ROOT` to its absolute path. Results and plots go into separate `<Slurm job ID>/<market>/` directories under the chosen roots. Slurm writes `heston-<job ID>_<array index>.out/.err` in the submission directory. The script uses `$SLURM_CPUS_PER_TASK` for `--workers` and limits numerical-library threads to one per worker.
+
+Before a production run, verify that the SQLite database contains the configured threshold tables and market rows. `scripts/calibrate_heston.py --config-json configs/heston_quick.json --database /path/to/stabilvol_filtered.sqlite` is a small smoke run. The calibration loader opens SQLite read-only and reports a missing database rather than creating one.
+
+### Interpretation
+
+The default optimizer now fits the **MFHT-versus-local-volatility curves** directly. For each market and threshold pair, it fixes 40 equally spaced volatility bins from zero through the empirical 99.5th percentile, then compares mean FHT in bins with enough empirical events. The loss is the root mean squared curve difference, scaled by the empirical MFHT peak; missing simulated bins receive a penalty, and `event_count_weight` adds a small penalty for a mismatch in the volatility-bin event distribution. The bin edges are derived once from empirical data and reused for every candidate and validation run. `min_empirical_bin_events` (default 20) and `min_simulated_bin_events` (default 5) control which bins are trusted. Each fitted comparison saves a `*_mfht.csv` with bin edges, MFHTs, counts, and coverage flags alongside its plot.
+
+The former KS FHT-distribution objective is still available with `--loss-metric fht_distribution` or `"loss_metric": "fht_distribution"` in a config. Neither objective alone establishes that a fit generalizes; compare independent-seed curves and event counts. Keep threshold normalization consistent with the empirical database: the quick/default-grid configs use `std_normalization=true`, while `heston_un_parallel.json` uses `false`.
+
+The script writes the effective run configuration, fitted parameters, and loss summaries to `data/processed/heston_calibration/`, and comparison plots to `visualization/heston_calibration/`. For each market it saves the diagnostic 2D empirical-vs-synthetic histogram/MFHT plots, a return-density overlay named `<MARKET>_returns_pdf.png`, and an FHT-density overlay named `<MARKET>_fht_pdf.png`. The CSV outputs also include empirical and synthetic return moments: mean, variance, skewness, and kurtosis.
 
 Default calibration choices:
 
@@ -134,7 +215,7 @@ Default calibration choices:
 - markets: `UN`, `UW`, `LN`, `JT`;
 - thresholds: `(-0.5, -1.5)`, `(-1.0, -2.0)`, `(0.5, 1.5)`, `(1.0, 2.0)`;
 - simulated FHT threshold normalization: `std_normalization = true`; set `"std_normalization": false` in the JSON config or pass `--no-std-normalization` to use raw thresholds;
-- loss target: mean two-sample Kolmogorov-Smirnov statistic between empirical and simulated FHT distributions, averaged across configured threshold pairs and ignoring volatility;
+- loss target: MFHT-versus-volatility curve discrepancy, averaged across configured threshold pairs, with an event-distribution penalty; the former FHT KS score remains optional;
 - optimized parameters by default: `a`, `b`, `aa`, `bb`, `cc`, and `vstart`; `rho` is optimized only if `correlated_noise` is explicitly set to `true`;
 - pilot optimization: `min(512, n_market_stocks)` paths and 3030 steps;
 - full validation: market-sized path count and 11089 steps.
@@ -143,26 +224,25 @@ The old `calmG.f` counter is not the primary v1 API. It differs from the current
 
 ## Setup
 
-Use the project virtual environment if it already exists:
+For the Heston CLI, use the project virtual environment if it already exists:
 
 ```bash
-.venv/bin/python -m pip install -e .
+.venv/bin/python -m pip install -r requirements-heston.txt
 ```
 
 Or create one:
 
 ```bash
 python3 -m venv .venv
-.venv/bin/python -m pip install -r requirements.txt
-.venv/bin/python -m pip install -e .
+.venv/bin/python -m pip install -r requirements-heston.txt
 ```
 
-`requirements.txt` is an environment snapshot. On non-Windows systems, `pywin32` may need to be removed or skipped if installation fails.
+`requirements.txt` is a Windows environment snapshot and includes `pywin32`; skip it on Linux when only running Heston. `requirements-heston.txt` also includes `seaborn` and `tqdm` imported by the shared FHT counter. On Windows, use `.\.venv\Scripts\python.exe` in place of `.venv/bin/python`.
 
-Matplotlib may try to write cache files outside the sandbox/user-writable area. If needed, run commands with:
+Matplotlib may try to write cache files outside a writable area. If needed, set a writable cache path (this does not change the working directory):
 
 ```bash
-MPLCONFIGDIR=/tmp
+export MPLCONFIGDIR="${TMPDIR:-/tmp}/matplotlib-$USER"
 ```
 
 ## Current Caveats
