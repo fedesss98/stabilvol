@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
 #SBATCH --job-name=heston-smoke
+#SBATCH --partition=master
+#SBATCH --nodelist=treachery
 #SBATCH --nodes=1
+#SBATCH --ntasks=1
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=8G
 #SBATCH --time=00:30:00
-#SBATCH --output=heston-smoke-%j.out
-#SBATCH --error=heston-smoke-%j.err
+#SBATCH --output=logs/%x_%j.out
+#SBATCH --error=logs/%x_%j.err
 
 set -euo pipefail
 

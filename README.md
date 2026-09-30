@@ -105,7 +105,7 @@ For Slurm on the configured cluster, run `uv sync` from `/data/qmla/famato/stabi
 sbatch scripts/reproduce_heston_paper.sbatch
 ```
 
-The job defaults to one 1071-by-3030 realization and writes under `data/processed/heston_paper/<job ID>/seed-<seed>/`. To assess variation across seeds, submit `sbatch --array=0-9%5 scripts/reproduce_heston_paper.sbatch`; the seed is 12345 plus the array index. After all tasks finish, run `uv run python scripts/summarize_heston_paper.py data/processed/heston_paper/<job ID>` to save cross-seed MFHT curves and parameter summaries. Each task requests one CPU, 8 GB, and one hour. Its repository and output paths are set in the batch file.
+The job defaults to one 1071-by-3030 realization and writes under `data/processed/heston_paper/<job ID>/seed-<seed>/`. To assess variation across seeds, submit `sbatch --array=0-9%5 scripts/reproduce_heston_paper.sbatch`; the seed is 12345 plus the array index. After all tasks finish, run `uv run python scripts/summarize_heston_paper.py data/processed/heston_paper/<job ID>` to save cross-seed MFHT curves and parameter summaries. Each task requests one CPU, 8 GB, and one hour. Its repository and output paths are set in the batch file; Slurm output goes to `logs/heston-paper_<job ID>_<array index>.out/.err`.
 
 **Current comparison:** seed 12345 gives mean per-series return standard deviation `0.023805`, close to the paper's `0.02383`. The Fortran-style crash and rally MFHT peaks are at reported coordinates `0.00584` and `0.00638`, with heights `94.2` and `92.4` steps, close to the peaks shown around `0.006` and 90–100 steps in Figs. 2(a) and 3(a). Their physical bin centers are `0.01166` and `0.01274`. The pooled return standard deviation is `0.02406` versus the paper's `0.024`, while skewness and kurtosis for this seed are `-1.06` and `67.2` versus the paper's `-1.96` and `105`; those higher moments remain sensitive to random realization and the original custom Fortran RNG. The Python and Fortran generators are therefore not expected to produce identical paths. The MFHT peak agreement is a comparison of the analysis convention, not a bit-for-bit replay.
 
@@ -187,7 +187,7 @@ For the four-market, four-threshold run, submit the [full array job](scripts/cal
 sbatch scripts/calibrate_heston.sbatch
 ```
 
-Array tasks `0=UN`, `1=UW`, `2=LN`, `3=JT` each use eight CPUs and 64 GB for up to 24 hours, with at most two tasks concurrent. The batch files set the config, database, output, and figure paths directly and run the optimizer with `$SLURM_CPUS_PER_TASK` workers. They do not require MPI. The calibration loader opens SQLite read-only and reports missing database files or tables rather than creating them. Slurm writes `heston-<job ID>_<array index>.out/.err` in the submission directory for the full job.
+Array tasks `0=UN`, `1=UW`, `2=LN`, `3=JT` each use eight CPUs and 64 GB for up to 24 hours, with at most two tasks concurrent. The batch files target the `master` partition on `treachery`, request one task per job, and use the tracked `logs/` directory for Slurm output. Submit from the repository root so these relative log paths resolve there. The batch files set the config, database, output, and figure paths directly and run the optimizer with `$SLURM_CPUS_PER_TASK` workers. They do not require MPI or a GPU. The calibration loader opens SQLite read-only and reports missing database files or tables rather than creating them. Full-job logs are `logs/heston-calibration_<job ID>_<array index>.out/.err`.
 
 ### Interpretation
 

@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
 #SBATCH --job-name=heston-calibration
+#SBATCH --partition=master
+#SBATCH --nodelist=treachery
 #SBATCH --array=0-3%2
 #SBATCH --nodes=1
+#SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64G
 #SBATCH --time=24:00:00
-#SBATCH --output=heston-%A_%a.out
-#SBATCH --error=heston-%A_%a.err
+#SBATCH --output=logs/%x_%A_%a.out
+#SBATCH --error=logs/%x_%A_%a.err
 
 set -euo pipefail
 

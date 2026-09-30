@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
 #SBATCH --job-name=heston-paper
+#SBATCH --partition=master
+#SBATCH --nodelist=treachery
 #SBATCH --array=0
 #SBATCH --nodes=1
+#SBATCH --ntasks=1
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=8G
 #SBATCH --time=01:00:00
-#SBATCH --output=heston-paper-%A_%a.out
-#SBATCH --error=heston-paper-%A_%a.err
+#SBATCH --output=logs/%x_%A_%a.out
+#SBATCH --error=logs/%x_%A_%a.err
 
 set -euo pipefail
 

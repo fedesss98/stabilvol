@@ -2,6 +2,8 @@
 data/
 heston-*.out
 heston-*.err
+logs/*.out
+logs/*.err
 static/
 
 # Ignore ipynb checkpoints
