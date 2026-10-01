@@ -1,0 +1,32 @@
+{
+  "description": "UN return-moment fit followed by one empirical-sigma crash MFHT fit.",
+  "markets": ["UN"],
+  "threshold_pairs": [[-0.1, -1.5]],
+  "empirical_source": "returns",
+  "loss_metric": "mfht_curve",
+  "return_loss_weight": 2.0,
+  "std_normalization": false,
+  "correlated_noise": false,
+  "pilot_max_paths": 512,
+  "min_empirical_observations": 3030,
+  "pilot_n_steps": 3030,
+  "full_n_steps": 11089,
+  "n_vol_bins": 30,
+  "min_empirical_bin_events": 20,
+  "min_simulated_bin_events": 5,
+  "seed": 12345,
+  "run": {
+    "staged": true,
+    "return_maxiter": 25,
+    "return_popsize": 8,
+    "maxiter": 40,
+    "popsize": 8,
+    "workers": 8,
+    "polish": false,
+    "refine": false,
+    "skip_full_validation": false,
+    "plot_full": false,
+    "output_dir": "data/processed/heston_calibration/staged_un",
+    "figure_dir": "visualization/heston_calibration/staged_un"
+  }
+}

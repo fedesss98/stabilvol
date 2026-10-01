@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import replace
 from datetime import datetime
 import json
 from pathlib import Path
@@ -20,6 +21,7 @@ import pandas as pd
 
 from stabilvol.heston import CalibrationConfig, HestonCalibrator, HestonParams, SimulationConfig, simulate_modified_heston
 from stabilvol.heston.calibration import config_to_record, moments_frame
+from stabilvol.heston.simulation import SimulationError
 
 
 def parse_threshold_pair(value: str) -> tuple[float, float]:
@@ -46,6 +48,9 @@ def default_run_options() -> dict[str, object]:
         "skip_full_validation": False,
         "evaluate_default": False,
         "plot_full": False,
+        "staged": False,
+        "return_maxiter": 20,
+        "return_popsize": 8,
         "output_dir": PROJECT_ROOT / "data/processed/heston_calibration",
         "figure_dir": PROJECT_ROOT / "visualization/heston_calibration",
     }
@@ -98,6 +103,15 @@ def print_result(record: dict[str, object]) -> None:
             f"skewness={record['empirical_return_skewness']:.6g}, "
             f"kurtosis={record['empirical_return_kurtosis']:.6g}"
         )
+    if "empirical_average_std" in record:
+        print(
+            "  average per-series returns: "
+            f"empirical mean={record['empirical_average_mean']:.6g}, "
+            f"empirical std={record['empirical_average_std']:.6g}, "
+            f"synthetic mean={record['synthetic_average_mean']:.6g}, "
+            f"synthetic std={record['synthetic_average_std']:.6g}"
+        )
+        print(f"  plot losses: MFHT={record['plot_mfht_loss']:.6g}, returns={record['plot_return_loss']:.6g}")
     print(f"  elapsed_seconds: {record['elapsed_seconds']:.3f}")
 
 
@@ -132,6 +146,7 @@ def build_config(args: argparse.Namespace, config_data: dict) -> CalibrationConf
         threshold_pairs=threshold_pairs,
         start_date=args.start_date if args.start_date is not None else config_data.get("start_date", defaults.start_date),
         end_date=args.end_date if args.end_date is not None else config_data.get("end_date", defaults.end_date),
+        min_empirical_observations=config_data.get("min_empirical_observations", defaults.min_empirical_observations),
         vol_limit=args.vol_limit if args.vol_limit is not None else config_data.get("vol_limit", defaults.vol_limit),
         tau_min=args.tau_min if args.tau_min is not None else config_data.get("tau_min", defaults.tau_min),
         tau_max=args.tau_max if args.tau_max is not None else config_data.get("tau_max", defaults.tau_max),
@@ -144,6 +159,9 @@ def build_config(args: argparse.Namespace, config_data: dict) -> CalibrationConf
         min_empirical_bin_events=config_data.get("min_empirical_bin_events", defaults.min_empirical_bin_events),
         min_simulated_bin_events=config_data.get("min_simulated_bin_events", defaults.min_simulated_bin_events),
         loss_metric=args.loss_metric if getattr(args, "loss_metric", None) is not None else config_data.get("loss_metric", defaults.loss_metric),
+        empirical_source=config_data.get("empirical_source", defaults.empirical_source),
+        threshold_sigma=config_data.get("threshold_sigma", defaults.threshold_sigma),
+        return_loss_weight=config_data.get("return_loss_weight", defaults.return_loss_weight),
         seed=args.seed if args.seed is not None else config_data.get("seed", defaults.seed),
         bounds=bounds,
         base_params=base_params,
@@ -303,6 +321,8 @@ def plot_market_comparisons(
         output_dir / f"{market}_returns_pdf.png",
         market=market,
     )
+    if calibrator.config.loss_metric == "return_moments":
+        return empirical_returns, simulation.returns
 
     event_pairs = {}
     for pair in calibrator.config.threshold_pairs:
@@ -336,13 +356,15 @@ def plot_market_comparisons(
         fht_edges = np.arange(calibrator.config.tau_min, calibrator.config.tau_max + 2)
         empirical_hist, _, _ = np.histogram2d(empirical["Volatility"], empirical["FHT"], bins=[vol_edges, fht_edges])
         simulated_hist, _, _ = np.histogram2d(simulated["Volatility"], simulated["FHT"], bins=[vol_edges, fht_edges])
+        empirical_hist /= max(empirical_hist.sum(), 1)
+        simulated_hist /= max(simulated_hist.sum(), 1)
 
         fig, axs = plt.subplots(1, 3, figsize=(15, 4), layout="constrained")
-        vmax = max(empirical_hist.max(), simulated_hist.max(), 1)
+        vmax = max(empirical_hist.max(), simulated_hist.max(), np.finfo(float).eps)
         axs[0].imshow(empirical_hist.T, aspect="auto", origin="lower", vmax=vmax)
-        axs[0].set_title("Empirical")
+        axs[0].set_title("Empirical event fraction")
         axs[1].imshow(simulated_hist.T, aspect="auto", origin="lower", vmax=vmax)
-        axs[1].set_title("Simulated")
+        axs[1].set_title("Simulated event fraction")
         axs[2].plot(empirical_x, empirical_y, label="Empirical")
         axs[2].plot(simulated_x, simulated_y, label="Simulated")
         axs[2].set_title("MFHT projection")
@@ -379,7 +401,7 @@ def main() -> None:
     parser.add_argument("--pilot-steps", type=int)
     parser.add_argument("--full-steps", type=int)
     parser.add_argument("--vol-bins", type=int)
-    parser.add_argument("--loss-metric", choices=("mfht_curve", "fht_distribution"),
+    parser.add_argument("--loss-metric", choices=("mfht_curve", "fht_distribution", "return_moments"),
                         help="Objective to optimize; default is the MFHT-versus-volatility curve")
     parser.add_argument("--seed", type=int)
     parser.add_argument("--std-normalization", action="store_true", default=None, help="Scale simulated FHT thresholds by the simulated return standard deviation")
@@ -403,13 +425,22 @@ def main() -> None:
     parser.add_argument("--figure-dir", type=Path)
     parser.add_argument("--plot-full", action="store_true", default=None, help="Use full path count and length for plots")
     parser.add_argument("--plot-pilot", dest="plot_full", action="store_false")
+    parser.add_argument("--staged", action="store_true", default=None,
+                        help="Fit return mean/std first, then one MFHT curve with a return penalty")
+    parser.add_argument("--return-maxiter", type=int, help="First-stage optimizer generations")
+    parser.add_argument("--return-popsize", type=int, help="First-stage population multiplier")
     args = parser.parse_args()
 
     config_data = load_json_config(args.config_json) if args.config_json else {}
     run_options = build_run_options(args, config_data)
     config = build_config(args, config_data)
-    if not config.absolute_database_path.is_file():
+    if config.empirical_source == "database" and config.loss_metric != "return_moments" and not config.absolute_database_path.is_file():
         parser.error(f"empirical FHT database not found: {config.absolute_database_path}")
+    if run_options.staged:
+        if run_options.evaluate_default or config.loss_metric != "mfht_curve" or len(config.threshold_pairs) != 1:
+            parser.error("staged mode requires optimization of exactly one MFHT threshold pair")
+        if config.empirical_source != "returns" or config.return_loss_weight <= 0:
+            parser.error("staged mode requires empirical_source=returns and positive return_loss_weight")
     for market in config.markets:
         returns_path = config.root / "data" / "interim" / f"{market}.pickle"
         if not returns_path.is_file():
@@ -419,15 +450,11 @@ def main() -> None:
     run_options.figure_dir.mkdir(parents=True, exist_ok=True)
     run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
     manifest_path = run_options.output_dir / f"heston_calibration_config_{run_id}.json"
+    manifest_record = {"calibration": config_to_record(config), "run": vars(run_options)}
     with manifest_path.open("w", encoding="utf-8") as handle:
-        json.dump(
-            {"calibration": config_to_record(config), "run": vars(run_options)},
-            handle,
-            indent=2,
-            default=str,
-        )
+        json.dump(manifest_record, handle, indent=2, default=str)
     run_start = time.perf_counter()
-    mode = "evaluate-default" if run_options.evaluate_default else "optimize"
+    mode = "staged" if run_options.staged else ("evaluate-default" if run_options.evaluate_default else "optimize")
 
     print("Modified Heston calibration")
     print(f"  run_id: {run_id}")
@@ -439,10 +466,14 @@ def main() -> None:
     print(f"  markets: {', '.join(config.markets)}")
     print(f"  thresholds: {format_threshold_pairs(config.threshold_pairs)}")
     print(f"  std_normalization: {config.std_normalization}")
+    print(f"  empirical_source: {config.empirical_source}")
+    print(f"  threshold_sigma: {config.threshold_sigma if config.threshold_sigma is not None else 'automatic'}")
+    print(f"  return_loss_weight: {config.return_loss_weight}")
     print(f"  loss_metric: {config.loss_metric}")
     print(f"  noise: {'correlated' if config.correlated_noise else 'uncorrelated'}")
     print(f"  optimized_parameters: {', '.join(calibrator.parameter_names())}")
-    print(f"  database: {config.absolute_database_path}")
+    if config.empirical_source == "database":
+        print(f"  database: {config.absolute_database_path}")
     print(f"  output_dir: {run_options.output_dir}")
     print(f"  effective_config: {manifest_path}")
     print(f"  figure_dir: {run_options.figure_dir}")
@@ -469,17 +500,90 @@ def main() -> None:
         )
 
     results = []
+    stage1_results = []
     loss_records = []
     for market in config.markets:
         market_start = time.perf_counter()
         _, n_market_stocks = calibrator.market_shape(market)
         print(f"\n[{market}] starting with {n_market_stocks} empirical stocks")
+        market_config = config
+        if run_options.staged:
+            first_config = replace(
+                config, loss_metric="return_moments", threshold_pairs=(), return_loss_weight=0.0,
+                initial_params=config.initial_params or config.base_params,
+            )
+            first_calibrator = HestonCalibrator(first_config)
+            target = first_calibrator.empirical_return_target(market)
+            print(f"[{market}] empirical average mean={target.mean:.8g}, average std={target.std:.8g} "
+                  f"across {target.n_series} valid stocks")
+            print(f"[{market}] stage 1: fitting return mean and std")
+            first_result = first_calibrator.calibrate_market(
+                market,
+                maxiter=run_options.return_maxiter,
+                popsize=run_options.return_popsize,
+                workers=run_options.workers,
+                polish=run_options.polish,
+                refine=run_options.refine,
+                validate_full=False,
+                progress=not run_options.quiet_progress,
+            )
+            first_plot = None
+            if np.isfinite(first_result.pilot_loss):
+                try:
+                    first_plot = simulate_modified_heston(
+                        first_result.params,
+                        SimulationConfig(
+                            n_paths=min(config.pilot_max_paths, n_market_stocks),
+                            n_steps=config.pilot_n_steps,
+                            seed=config.seed + 200_000,
+                            correlated_noise=config.correlated_noise,
+                            store_state=False,
+                            column_prefix=market,
+                        ),
+                    ).returns
+                    first_figure_dir = run_options.figure_dir / market
+                    first_figure_dir.mkdir(parents=True, exist_ok=True)
+                    plot_returns_pdf(
+                        first_calibrator.load_empirical_returns(market), first_plot,
+                        first_figure_dir / f"{market}_stage1_returns_pdf.png", market=market,
+                    )
+                except (SimulationError, FloatingPointError, OverflowError, ValueError) as exc:
+                    print(f"[{market}] stage 1 independent-seed return plot unavailable: {exc}")
+            stage1_results.append({
+                **first_result.to_record(),
+                "run_id": run_id,
+                "loss_metric": "return_moments",
+                "empirical_average_mean": target.mean,
+                "empirical_average_std": target.std,
+                "empirical_target_stocks": target.n_series,
+                "plot_return_loss": first_calibrator.return_moment_loss(first_plot, target)
+                if first_plot is not None else None,
+                "synthetic_average_mean": float(first_plot.mean(axis=0).mean())
+                if first_plot is not None else None,
+                "synthetic_average_std": float(first_plot.std(axis=0).mean())
+                if first_plot is not None else None,
+            })
+            stage1_latest = run_options.output_dir / "heston_calibration_stage1_parameters.csv"
+            stage1_run = run_options.output_dir / f"heston_calibration_stage1_parameters_{run_id}.csv"
+            pd.DataFrame(stage1_results).to_csv(stage1_latest, index=False)
+            pd.DataFrame(stage1_results).to_csv(stage1_run, index=False)
+            if not np.isfinite(first_result.pilot_loss):
+                raise RuntimeError(f"[{market}] stage 1 found no finite return fit; saved {stage1_run}")
+            print(f"[{market}] stage 1 loss={first_result.pilot_loss:.6g}; parameters={first_result.params.to_dict()}")
+            market_config = replace(config, threshold_sigma=target.std, initial_params=first_result.params)
+            manifest_record.setdefault("resolved_threshold_sigma_by_market", {})[market] = target.std
+            with manifest_path.open("w", encoding="utf-8") as handle:
+                json.dump(manifest_record, handle, indent=2, default=str)
+            del first_calibrator
+            calibrator = HestonCalibrator(market_config)
+            print(f"[{market}] stage 2: MFHT {format_threshold_pairs(config.threshold_pairs)} "
+                  f"with fixed empirical sigma={target.std:.8g}")
         if run_options.evaluate_default:
             n_paths = min(config.pilot_max_paths, n_market_stocks)
             print(f"[{market}] evaluating default parameters on {n_paths} paths x {config.pilot_n_steps} steps")
             loss, _ = calibrator.evaluate_params(
                 market,
-                config.base_params,
+                market_config.base_params,
                 n_paths=n_paths,
                 n_steps=config.pilot_n_steps,
                 seed=config.seed,
@@ -494,10 +598,10 @@ def main() -> None:
                 "n_paths_full": n_market_stocks,
                 "n_steps_pilot": config.pilot_n_steps,
                 "n_steps_full": config.full_n_steps,
-                **config.base_params.to_dict(),
+                **market_config.base_params.to_dict(),
             }
             result_record = result
-            fitted_params = config.base_params
+            fitted_params = market_config.base_params
         else:
             print(f"[{market}] optimizing parameters")
             calibration_result = calibrator.calibrate_market(
@@ -534,7 +638,10 @@ def main() -> None:
             {
                 "run_id": run_id,
                 "mode": mode,
-                "loss_metric": config.loss_metric,
+                "loss_metric": market_config.loss_metric,
+                "empirical_source": market_config.empirical_source,
+                "threshold_sigma": market_config.threshold_sigma,
+                "return_loss_weight": market_config.return_loss_weight,
                 "correlated_noise": config.correlated_noise,
                 "optimized_parameters": ",".join(calibrator.parameter_names()),
                 "config_json": str(args.config_json) if args.config_json else None,
@@ -551,13 +658,25 @@ def main() -> None:
                 **moment_record,
             }
         )
+        if run_options.staged:
+            result_record["plot_return_loss"] = calibrator.return_moment_loss(synthetic_returns, target)
+            result_record["plot_mfht_loss"] = calibrator.grid_loss(
+                calibrator.load_empirical_grid(market), synthetic_returns, market)
+            result_record["empirical_average_mean"] = target.mean
+            result_record["empirical_average_std"] = target.std
+            result_record["empirical_target_stocks"] = target.n_series
+            result_record["synthetic_average_mean"] = float(synthetic_returns.mean(axis=0).mean())
+            result_record["synthetic_average_std"] = float(synthetic_returns.std(axis=0).mean())
         results.append(result_record)
         print_result(result_record)
         loss_records.append(
             {
                 "run_id": run_id,
                 "market": market,
-                "loss_metric": config.loss_metric,
+                "loss_metric": market_config.loss_metric,
+                "empirical_source": market_config.empirical_source,
+                "threshold_sigma": market_config.threshold_sigma,
+                "return_loss_weight": market_config.return_loss_weight,
                 "correlated_noise": config.correlated_noise,
                 "optimized_parameters": ",".join(calibrator.parameter_names()),
                 "config_json": str(args.config_json) if args.config_json else None,
@@ -571,6 +690,15 @@ def main() -> None:
                 "plots_n_steps": plot_n_steps,
                 "elapsed_seconds": market_elapsed,
                 **moment_record,
+                **({
+                    "plot_return_loss": result_record["plot_return_loss"],
+                    "plot_mfht_loss": result_record["plot_mfht_loss"],
+                    "empirical_average_mean": result_record["empirical_average_mean"],
+                    "empirical_average_std": result_record["empirical_average_std"],
+                    "empirical_target_stocks": result_record["empirical_target_stocks"],
+                    "synthetic_average_mean": result_record["synthetic_average_mean"],
+                    "synthetic_average_std": result_record["synthetic_average_std"],
+                } if run_options.staged else {}),
             }
         )
 
@@ -583,6 +711,8 @@ def main() -> None:
     pd.DataFrame(results).to_csv(parameters_run, index=False)
     pd.DataFrame(loss_records).to_csv(outputs_latest, index=False)
     pd.DataFrame(loss_records).to_csv(outputs_run, index=False)
+    if stage1_results:
+        print(f"  saved stage 1 parameters: {stage1_run}")
     print("\nRun complete")
     print(f"  total_elapsed_seconds: {total_elapsed:.3f}")
     print(f"  saved latest parameters: {parameters_latest}")

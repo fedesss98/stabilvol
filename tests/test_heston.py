@@ -1,8 +1,13 @@
 import unittest
 from argparse import Namespace
 from contextlib import closing
+from contextlib import redirect_stdout
+from dataclasses import replace
+import io
+import json
 from pathlib import Path
 import sqlite3
+import sys
 import tempfile
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -10,6 +15,7 @@ from unittest.mock import patch
 import numpy as np
 import pandas as pd
 
+from scripts import calibrate_heston
 from scripts.calibrate_heston import build_config, plot_market_comparisons
 from stabilvol.heston import CalibrationConfig, HestonCalibrator, HestonParams, SimulationConfig, simulate_modified_heston
 from stabilvol.heston.calibration import _heston_worker_objective, moments_frame, table_name_for_thresholds
@@ -28,6 +34,23 @@ class HestonSimulationTests(unittest.TestCase):
         self.assertEqual(first.x.shape, (12, 4))
         np.testing.assert_allclose(first.returns.to_numpy(), second.returns.to_numpy())
         self.assertTrue((first.variance >= 0).all())
+
+    def test_daily_returns_are_log_state_increments_before_resets(self):
+        params = HestonParams(reset_threshold=-1e6)
+        result = simulate_modified_heston(
+            params, SimulationConfig(n_paths=4, n_steps=30, seed=42),
+        )
+        previous_x = np.vstack((np.full((1, 4), params.start), result.x[:-1]))
+        np.testing.assert_allclose(result.returns.to_numpy(), result.x - previous_x)
+
+    def test_crossing_increment_is_recorded_before_state_reset(self):
+        result = simulate_modified_heston(
+            HestonParams(reset_threshold=0.0),
+            SimulationConfig(n_paths=16, n_steps=2, seed=42),
+        )
+        crossed = result.returns.iloc[0].to_numpy() < 0
+        self.assertTrue(crossed.any())
+        np.testing.assert_allclose(result.x[0, crossed], 0.0)
 
     def test_correlated_noise_is_available(self):
         params = HestonParams(cc=0.01, rho=0.75)
@@ -88,6 +111,84 @@ class HestonCountingTests(unittest.TestCase):
 
 
 class HestonCalibrationTests(unittest.TestCase):
+    def test_staged_run_saves_both_fits_on_small_synthetic_data(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "data" / "interim").mkdir(parents=True)
+            returns = simulate_modified_heston(
+                HestonParams(), SimulationConfig(n_paths=16, n_steps=300, seed=5, store_state=False),
+            ).returns
+            returns.to_pickle(root / "data" / "interim" / "UN.pickle")
+            config_path = root / "staged.json"
+            config_path.write_text(json.dumps({
+                "markets": ["UN"], "threshold_pairs": [[-0.1, -1.5]],
+                "empirical_source": "returns", "loss_metric": "mfht_curve",
+                "return_loss_weight": 2.0, "pilot_max_paths": 16,
+                "pilot_n_steps": 300, "full_n_steps": 300, "n_vol_bins": 4,
+                "min_empirical_bin_events": 1, "min_simulated_bin_events": 1,
+                "run": {"staged": True, "return_maxiter": 0, "return_popsize": 1,
+                        "maxiter": 0, "popsize": 1, "workers": 1,
+                        "skip_full_validation": True, "output_dir": "results", "figure_dir": "figures"},
+            }), encoding="utf-8")
+            with patch.object(calibrate_heston, "PROJECT_ROOT", root), \
+                 patch.object(sys, "argv", ["calibrate_heston.py", "--config-json", str(config_path)]), \
+                 redirect_stdout(io.StringIO()):
+                calibrate_heston.main()
+            stage1 = pd.read_csv(root / "results" / "heston_calibration_stage1_parameters.csv")
+            stage2 = pd.read_csv(root / "results" / "heston_calibration_parameters.csv")
+            self.assertTrue(np.isfinite(stage1.loc[0, "pilot_loss"]))
+            self.assertTrue(np.isfinite(stage2.loc[0, "pilot_loss"]))
+            self.assertAlmostEqual(stage2.loc[0, "threshold_sigma"], returns.std().mean())
+            self.assertTrue((root / "figures" / "UN" / "UN_stage1_returns_pdf.png").is_file())
+            self.assertTrue((root / "figures" / "UN" / "UN_m0p1_m1p5_mfht.csv").is_file())
+
+    def test_return_target_and_loss_use_average_per_series_moments(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "data" / "interim").mkdir(parents=True)
+            returns = pd.DataFrame({
+                "a": [0.0, 2.0, 4.0],
+                "b": [1.0, 1.0, 1.0],
+                "short": [1.0, np.nan, np.nan],
+            }, index=pd.date_range("2000-01-01", periods=3))
+            returns.to_pickle(root / "data" / "interim" / "UN.pickle")
+            calibrator = HestonCalibrator(CalibrationConfig(
+                root=root, loss_metric="return_moments", min_empirical_observations=3,
+            ))
+            target = calibrator.empirical_return_target("UN")
+            self.assertEqual(calibrator.market_shape("UN"), (3, 2))
+            self.assertAlmostEqual(target.mean, 2.0)
+            self.assertAlmostEqual(target.std, 2.0)
+            self.assertEqual(target.n_series, 1)
+            self.assertAlmostEqual(calibrator.return_moment_loss(returns[["a"]], target), 0.0)
+            self.assertGreater(calibrator.return_moment_loss(returns[["a"]] * 2, target), 0.0)
+
+    def test_fixed_empirical_sigma_is_used_for_both_event_samples(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "data" / "interim").mkdir(parents=True)
+            returns = pd.DataFrame(
+                {"a": [0.0, -0.6, -0.7, -1.6, 0.0]},
+                index=pd.date_range("2000-01-01", periods=5),
+            )
+            returns.to_pickle(root / "data" / "interim" / "UN.pickle")
+            config = CalibrationConfig(
+                root=root, empirical_source="returns", threshold_sigma=1.0,
+                threshold_pairs=((-0.5, -1.5),), std_normalization=True,
+            )
+            calibrator = HestonCalibrator(config)
+            empirical = calibrator.load_empirical_events("UN", (-0.5, -1.5))
+            simulated = calibrator.count_simulated_events(returns, (-0.5, -1.5), "UN")
+            pd.testing.assert_frame_equal(empirical, simulated)
+            self.assertEqual(int(empirical.iloc[0]["FHT"]), 3)
+            calibrator.config = replace(config, threshold_sigma=0.025)
+            with patch("stabilvol.heston.calibration.StabilVolter") as counter:
+                with patch.object(calibrator, "_quiet_stabilvol", return_value=empirical):
+                    calibrator.count_simulated_events(returns, (-0.1, -1.5), "UN")
+                self.assertAlmostEqual(counter.call_args.kwargs["start_level"], -0.0025)
+                self.assertAlmostEqual(counter.call_args.kwargs["end_level"], -0.0375)
+                self.assertFalse(counter.call_args.kwargs["std_normalization"])
+
     def test_empirical_loader_finds_default_tables(self):
         with tempfile.TemporaryDirectory() as directory:
             database = Path(directory) / "fht.sqlite"

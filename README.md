@@ -159,6 +159,59 @@ For optimizer multiprocessing, set `run.workers` in the config or pass `--worker
 
 `base_params` sets fixed simulation parameters and the evaluate-default point. If `initial_params` is supplied, its optimized coordinates replace one member of the differential-evolution starting population; it does not constrain the fit.
 
+### Staged return and single-threshold MFHT calibration
+
+The model evolves one log-price displacement path per simulated stock,
+`x(t) = log[p(t)/p(0)]`, and records its daily log increment
+`x(t) - x(t-1)`. This approximates the simple daily returns in
+`data/interim/UN.pickle` when price changes are small. The original model
+restarts a path when it crosses `reset_threshold`; the crossing increment is
+recorded before the restart, while the optional stored `x` is the state after
+the restart.
+
+For the staged UN experiment, run:
+
+```bash
+uv run python scripts/calibrate_heston.py --config-json configs/heston_staged_un.json
+```
+
+The first optimizer fits the average of the per-stock daily means and the
+average of the per-stock daily standard deviations. Its loss is the squared
+mean error in units of `0.1 * empirical_average_std`, plus the squared log
+ratio of synthetic to empirical average standard deviations. The default
+model parameters are included in the initial population. Six parameters
+cannot be uniquely identified by two return statistics, so this is a scale
+and location fit, not a complete return-PDF fit.
+
+The staged config retains stocks with at least 3030 finite daily returns,
+matching the pilot simulation length as a minimum observation requirement.
+It does not recreate the paper's exact 1987-1998 stock sample. Set
+`min_empirical_observations` to zero to use every stock with a valid mean and
+standard deviation.
+
+The second optimizer starts with the first-stage parameters and fits only
+the crash MFHT curve for `(-0.1, -1.5)`. It adds the configured
+`return_loss_weight` times the return loss to keep the daily returns close
+to their target. The collective empirical scale is the mean per-stock
+standard deviation over the selected dates. Both empirical and simulated
+events use the same fixed thresholds, `-0.1 * empirical_average_std` and
+`-1.5 * empirical_average_std`. Empirical events are counted directly from
+`UN.pickle`, so this run does not need the previously processed SQLite
+database. The original paper computed a separate collective scale for its
+simulated paths; this experiment deliberately fixes the empirical scale on
+both sides.
+
+Stage-one parameters and losses are saved in
+`data/processed/heston_calibration/staged_un/heston_calibration_stage1_parameters*.csv`.
+Its independent-seed return comparison is
+`visualization/heston_calibration/staged_un/UN/UN_stage1_returns_pdf.png`.
+The usual parameter and output CSVs contain the second-stage fit, its fixed
+threshold scale, and return and MFHT diagnostic losses from an independent
+plotting seed. The plots and MFHT comparison CSV go to
+`visualization/heston_calibration/staged_un/UN/`. Adjust `run.return_maxiter`
+and `run.maxiter` separately in the JSON or with `--return-maxiter` and
+`--maxiter`.
+
 ### Slurm cluster run
 
 The cluster batch files set `repo_root=/data/qmla/famato/stabilvol` and use fixed paths below it. Stage this working tree, the SQLite file at `data/processed/trapezoidal_selection/stabilvol_filtered.sqlite`, and the market pickles under `data/interim/`. The smoke and pilot jobs need `UN.pickle`; the full four-market job also needs `UW.pickle`, `LN.pickle`, and `JT.pickle`. Data and the newly added batch files are not automatically available from an older Git checkout.

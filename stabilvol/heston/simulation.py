@@ -53,7 +53,12 @@ class SimulationConfig:
 
 @dataclass
 class SimulationResult:
-    """Container returned by :func:`simulate_modified_heston`."""
+    """Model paths and daily log-return increments.
+
+    ``x`` stores the post-reset state. On a reset step, ``returns`` records
+    the increment before the restart, as in the supplied Fortran model; the
+    difference of consecutive stored ``x`` values then includes the reset.
+    """
 
     returns: pd.DataFrame
     variance: Optional[np.ndarray]
@@ -149,7 +154,11 @@ def simulate_modified_heston(
     *,
     keep_shocks: bool = False,
 ) -> SimulationResult:
-    """Simulate the modified Heston model and return returns in StabilVol format."""
+    """Simulate independent log-price paths and their daily log increments.
+
+    Each column is one path of x(t) = log[p(t)/p(0)]. ``returns`` contains
+    x(t) - x(t-1) before the model's escape/reset rule is applied.
+    """
 
     _validate_inputs(params, config)
     rng = np.random.default_rng(config.seed)

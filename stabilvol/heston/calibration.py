@@ -47,6 +47,7 @@ class CalibrationConfig:
     threshold_pairs: tuple[tuple[float, float], ...] = DEFAULT_THRESHOLD_PAIRS
     start_date: str = "1980-01-01"
     end_date: str = "2022-07-01"
+    min_empirical_observations: int = 0
     vol_limit: float = 100.0
     tau_min: int = 2
     tau_max: int = 30
@@ -59,6 +60,9 @@ class CalibrationConfig:
     min_empirical_bin_events: int = 20
     min_simulated_bin_events: int = 5
     loss_metric: str = "mfht_curve"
+    empirical_source: str = "database"
+    threshold_sigma: Optional[float] = None
+    return_loss_weight: float = 0.0
     seed: int = 12345
     bounds: dict[str, tuple[float, float]] = field(default_factory=lambda: dict(DEFAULT_BOUNDS))
     base_params: HestonParams = field(default_factory=HestonParams)
@@ -73,10 +77,18 @@ class CalibrationConfig:
         object.__setattr__(self, "markets", tuple(self.markets))
         object.__setattr__(self, "threshold_pairs", tuple(tuple(pair) for pair in self.threshold_pairs))
         object.__setattr__(self, "bounds", {key: tuple(value) for key, value in self.bounds.items()})
-        if self.loss_metric not in ("mfht_curve", "fht_distribution"):
-            raise ValueError("loss_metric must be mfht_curve or fht_distribution")
+        if self.loss_metric not in ("mfht_curve", "fht_distribution", "return_moments"):
+            raise ValueError("loss_metric must be mfht_curve, fht_distribution, or return_moments")
+        if self.empirical_source not in ("database", "returns"):
+            raise ValueError("empirical_source must be database or returns")
+        if self.threshold_sigma is not None and self.threshold_sigma <= 0:
+            raise ValueError("threshold_sigma must be positive")
+        if self.return_loss_weight < 0:
+            raise ValueError("return_loss_weight must be nonnegative")
         if self.n_vol_bins < 1 or self.min_empirical_bin_events < 1 or self.min_simulated_bin_events < 1:
             raise ValueError("bin counts and minimum events per bin must be positive")
+        if self.min_empirical_observations < 0:
+            raise ValueError("min_empirical_observations must be nonnegative")
         if self.event_count_weight < 0 or self.empty_penalty <= 0:
             raise ValueError("event_count_weight must be nonnegative and empty_penalty positive")
 
@@ -122,6 +134,7 @@ class ObjectivePayload:
     n_paths: int
     n_steps: int
     seed: int
+    return_target: Optional[ReturnTarget] = None
 
 
 @dataclass(frozen=True)
@@ -133,6 +146,15 @@ class CurveTarget:
     mfht: np.ndarray
     eligible: np.ndarray
     fht_scale: float
+
+
+@dataclass(frozen=True)
+class ReturnTarget:
+    """Across-stock averages of daily-return mean and standard deviation."""
+
+    mean: float
+    std: float
+    n_series: int
 
 
 def stringify_threshold(value: float) -> str:
@@ -170,6 +192,7 @@ def heston_objective(vector: np.ndarray, payload: ObjectivePayload) -> float:
         n_paths=payload.n_paths,
         n_steps=payload.n_steps,
         seed=payload.seed,
+        return_target=payload.return_target,
     )
 
 
@@ -193,21 +216,53 @@ class HestonCalibrator:
     def __init__(self, config: CalibrationConfig):
         self.config = config
         self._empirical_cache: dict[tuple[str, tuple[float, float]], pd.DataFrame] = {}
+        self._returns_cache: dict[str, pd.DataFrame] = {}
 
     def market_shape(self, market: str) -> tuple[int, int]:
-        path = self.config.root / "data" / "interim" / f"{market}.pickle"
-        data = pd.read_pickle(path)
-        return data.shape
+        return self.load_empirical_returns(market).shape
 
     def load_empirical_returns(self, market: str) -> pd.DataFrame:
+        if market in self._returns_cache:
+            return self._returns_cache[market]
         path = self.config.root / "data" / "interim" / f"{market}.pickle"
         data = pd.read_pickle(path)
-        return data.loc[self.config.start_date : self.config.end_date]
+        dated = data.loc[self.config.start_date : self.config.end_date]
+        keep = dated.notna().sum(axis=0) >= self.config.min_empirical_observations
+        self._returns_cache[market] = dated.loc[:, keep]
+        return self._returns_cache[market]
+
+    def empirical_return_target(self, market: str) -> ReturnTarget:
+        returns = self.load_empirical_returns(market)
+        means = returns.mean(axis=0).to_numpy(dtype=float)
+        stds = returns.std(axis=0, ddof=1).to_numpy(dtype=float)
+        valid = np.isfinite(means) & np.isfinite(stds) & (stds > 0)
+        if not np.any(valid):
+            raise ValueError(f"no valid empirical return series for {market}")
+        return ReturnTarget(float(means[valid].mean()), float(stds[valid].mean()), int(valid.sum()))
+
+    @staticmethod
+    def return_moment_loss(returns: pd.DataFrame, target: ReturnTarget) -> float:
+        values = returns.to_numpy(dtype=float, copy=False)
+        model_mean = float(values.mean(axis=0).mean())
+        model_std = float(values.std(axis=0, ddof=1).mean())
+        if not np.isfinite(model_mean) or not np.isfinite(model_std) or model_std <= 0:
+            return float("inf")
+        # The mean is small in daily units; express its error in tenths of
+        # the empirical daily standard deviation. Compare widths by ratio.
+        return float(((model_mean - target.mean) / (0.1 * target.std)) ** 2
+                     + np.log(model_std / target.std) ** 2)
 
     def load_empirical_events(self, market: str, threshold_pair: tuple[float, float]) -> pd.DataFrame:
         cache_key = (market, threshold_pair)
         if cache_key in self._empirical_cache:
             return self._empirical_cache[cache_key]
+
+        if self.config.empirical_source == "returns":
+            frame = self.count_simulated_events(self.load_empirical_returns(market), threshold_pair, market)
+            if frame.empty:
+                raise ValueError(f"no empirical events for {market} at thresholds {threshold_pair}")
+            self._empirical_cache[cache_key] = frame
+            return frame
 
         table = table_name_for_thresholds(*threshold_pair)
         query = f"""
@@ -262,10 +317,11 @@ class HestonCalibrator:
         threshold_pair: tuple[float, float],
         market: str,
     ) -> pd.DataFrame:
+        fixed_sigma = self.config.threshold_sigma
         analyst = StabilVolter(
-            start_level=threshold_pair[0],
-            end_level=threshold_pair[1],
-            std_normalization=self.config.std_normalization,
+            start_level=threshold_pair[0] * fixed_sigma if fixed_sigma is not None else threshold_pair[0],
+            end_level=threshold_pair[1] * fixed_sigma if fixed_sigma is not None else threshold_pair[1],
+            std_normalization=False if fixed_sigma is not None else self.config.std_normalization,
             tau_min=self.config.tau_min,
             tau_max=self.config.tau_max,
         )
@@ -434,6 +490,7 @@ class HestonCalibrator:
         n_paths: int,
         n_steps: int,
         seed: int,
+        return_target: Optional[ReturnTarget] = None,
     ) -> float:
         try:
             params = self.params_from_vector(vector)
@@ -446,7 +503,16 @@ class HestonCalibrator:
                 column_prefix=market,
             )
             result = simulate_modified_heston(params, sim_config)
-            return self.grid_loss(empirical_grid, result.returns, market)
+            if self.config.loss_metric == "return_moments":
+                if return_target is None:
+                    raise ValueError("return target required for return_moments")
+                return self.return_moment_loss(result.returns, return_target)
+            loss = self.grid_loss(empirical_grid, result.returns, market)
+            if self.config.return_loss_weight:
+                if return_target is None:
+                    raise ValueError("return target required for return loss")
+                loss += self.config.return_loss_weight * self.return_moment_loss(result.returns, return_target)
+            return loss
         except (FloatingPointError, OverflowError, SimulationError, ValueError):
             return float("inf")
 
@@ -462,12 +528,16 @@ class HestonCalibrator:
         validate_full: bool = True,
         progress: bool = True,
     ) -> CalibrationResult:
-        empirical_grid = self.load_empirical_grid(market)
+        empirical_grid = {} if self.config.loss_metric == "return_moments" else self.load_empirical_grid(market)
         objective_grid = (
             {pair: self.prepare_curve_target(events) for pair, events in empirical_grid.items()}
             if self.config.loss_metric == "mfht_curve" else empirical_grid
         )
         _, n_market_stocks = self.market_shape(market)
+        return_target = (
+            self.empirical_return_target(market)
+            if self.config.loss_metric == "return_moments" or self.config.return_loss_weight else None
+        )
         n_paths_pilot = min(self.config.pilot_max_paths, n_market_stocks)
         seed = self.config.seed + sum((index + 1) * ord(char) for index, char in enumerate(market))
         payload = ObjectivePayload(
@@ -477,6 +547,7 @@ class HestonCalibrator:
             n_paths=n_paths_pilot,
             n_steps=self.config.pilot_n_steps,
             seed=seed,
+            return_target=return_target,
         )
         objective = partial(heston_objective, payload=payload)
         generation_start = time.perf_counter()
@@ -547,7 +618,12 @@ class HestonCalibrator:
                         column_prefix=market,
                     ),
                 )
-                validation_loss = self.grid_loss(objective_grid, validation_sim.returns, market)
+                if self.config.loss_metric == "return_moments":
+                    validation_loss = self.return_moment_loss(validation_sim.returns, return_target)
+                else:
+                    validation_loss = self.grid_loss(objective_grid, validation_sim.returns, market)
+                    validation_loss += self.config.return_loss_weight * self.return_moment_loss(
+                        validation_sim.returns, return_target)
             except (SimulationError, ValueError, FloatingPointError, OverflowError):
                 validation_loss = float("inf")
 
@@ -573,7 +649,7 @@ class HestonCalibrator:
         n_steps: Optional[int] = None,
         seed: Optional[int] = None,
     ) -> tuple[float, pd.DataFrame]:
-        empirical_grid = self.load_empirical_grid(market)
+        empirical_grid = {} if self.config.loss_metric == "return_moments" else self.load_empirical_grid(market)
         objective_grid = (
             {pair: self.prepare_curve_target(events) for pair, events in empirical_grid.items()}
             if self.config.loss_metric == "mfht_curve" else empirical_grid
@@ -593,7 +669,14 @@ class HestonCalibrator:
                 column_prefix=market,
             ),
         )
-        return self.grid_loss(objective_grid, simulation.returns, market), simulation.returns
+        if self.config.loss_metric == "return_moments":
+            loss = self.return_moment_loss(simulation.returns, self.empirical_return_target(market))
+        else:
+            loss = self.grid_loss(objective_grid, simulation.returns, market)
+            if self.config.return_loss_weight:
+                loss += self.config.return_loss_weight * self.return_moment_loss(
+                    simulation.returns, self.empirical_return_target(market))
+        return loss, simulation.returns
 
     def result_frame(self, results: Iterable[CalibrationResult]) -> pd.DataFrame:
         return pd.DataFrame([result.to_record() for result in results])
