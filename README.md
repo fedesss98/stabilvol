@@ -192,10 +192,10 @@ standard deviation.
 The second optimizer starts with the first-stage parameters and fits only
 the crash MFHT curve for `(-0.1, -1.5)`. It adds the configured
 `return_loss_weight` times the return loss to keep the daily returns close
-to their target. The collective empirical scale is the mean per-stock
-standard deviation over the selected dates. Both empirical and simulated
-events use the same fixed thresholds, `-0.1 * empirical_average_std` and
-`-1.5 * empirical_average_std`. Empirical events are counted directly from
+to their target. The collective empirical scale is the standard deviation
+of all finite returns from the selected stocks and dates. Both empirical and
+simulated events use the same fixed thresholds, `-0.1 * collective_sigma` and
+`-1.5 * collective_sigma`. Empirical events are counted directly from
 `UN.pickle`, so this run does not need the previously processed SQLite
 database. The original paper computed a separate collective scale for its
 simulated paths; this experiment deliberately fixes the empirical scale on
@@ -211,6 +211,19 @@ plotting seed. The plots and MFHT comparison CSV go to
 `visualization/heston_calibration/staged_un/UN/`. Adjust `run.return_maxiter`
 and `run.maxiter` separately in the JSON or with `--return-maxiter` and
 `--maxiter`.
+
+To refine the saved UN parameters with all 1294 eligible stocks in each
+pilot simulation, use `configs/heston_un_full_ensemble_refine.json`. It seeds
+the optimizer with the saved staged fit, uses the pooled empirical standard
+deviation for the fixed thresholds, and writes to separate output folders:
+
+```bash
+uv run python scripts/calibrate_heston.py --config-json configs/heston_un_full_ensemble_refine.json
+```
+
+The earlier `20261001_134240` staged run used the average per-stock standard
+deviation as its threshold scale. Its saved losses therefore are not directly
+comparable to losses from the collective-scale refinement.
 
 ### Slurm cluster run
 

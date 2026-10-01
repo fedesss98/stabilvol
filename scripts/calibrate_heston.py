@@ -514,6 +514,7 @@ def main() -> None:
             )
             first_calibrator = HestonCalibrator(first_config)
             target = first_calibrator.empirical_return_target(market)
+            collective_sigma = first_calibrator.empirical_collective_sigma(market)
             print(f"[{market}] empirical average mean={target.mean:.8g}, average std={target.std:.8g} "
                   f"across {target.n_series} valid stocks")
             print(f"[{market}] stage 1: fitting return mean and std")
@@ -570,14 +571,14 @@ def main() -> None:
             if not np.isfinite(first_result.pilot_loss):
                 raise RuntimeError(f"[{market}] stage 1 found no finite return fit; saved {stage1_run}")
             print(f"[{market}] stage 1 loss={first_result.pilot_loss:.6g}; parameters={first_result.params.to_dict()}")
-            market_config = replace(config, threshold_sigma=target.std, initial_params=first_result.params)
-            manifest_record.setdefault("resolved_threshold_sigma_by_market", {})[market] = target.std
+            market_config = replace(config, threshold_sigma=collective_sigma, initial_params=first_result.params)
+            manifest_record.setdefault("resolved_threshold_sigma_by_market", {})[market] = collective_sigma
             with manifest_path.open("w", encoding="utf-8") as handle:
                 json.dump(manifest_record, handle, indent=2, default=str)
             del first_calibrator
             calibrator = HestonCalibrator(market_config)
             print(f"[{market}] stage 2: MFHT {format_threshold_pairs(config.threshold_pairs)} "
-                  f"with fixed empirical sigma={target.std:.8g}")
+                  f"with fixed collective empirical sigma={collective_sigma:.8g}")
         if run_options.evaluate_default:
             n_paths = min(config.pilot_max_paths, n_market_stocks)
             print(f"[{market}] evaluating default parameters on {n_paths} paths x {config.pilot_n_steps} steps")

@@ -240,6 +240,17 @@ class HestonCalibrator:
             raise ValueError(f"no valid empirical return series for {market}")
         return ReturnTarget(float(means[valid].mean()), float(stds[valid].mean()), int(valid.sum()))
 
+    def empirical_collective_sigma(self, market: str) -> float:
+        """Standard deviation of all finite returns in the selected ensemble."""
+        values = self.load_empirical_returns(market).to_numpy(dtype=float, copy=False)
+        finite = values[np.isfinite(values)]
+        if finite.size < 2:
+            raise ValueError(f"no valid collective return standard deviation for {market}")
+        sigma = float(finite.std(ddof=0))
+        if not np.isfinite(sigma) or sigma <= 0:
+            raise ValueError(f"no valid collective return standard deviation for {market}")
+        return sigma
+
     @staticmethod
     def return_moment_loss(returns: pd.DataFrame, target: ReturnTarget) -> float:
         values = returns.to_numpy(dtype=float, copy=False)

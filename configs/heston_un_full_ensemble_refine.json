@@ -1,0 +1,38 @@
+{
+  "description": "Refine the saved UN single-threshold fit using all 1294 eligible stocks per pilot simulation.",
+  "markets": ["UN"],
+  "threshold_pairs": [[-0.1, -1.5]],
+  "empirical_source": "returns",
+  "loss_metric": "mfht_curve",
+  "threshold_sigma": 0.025160160194226237,
+  "return_loss_weight": 2.0,
+  "std_normalization": false,
+  "correlated_noise": false,
+  "min_empirical_observations": 3030,
+  "pilot_max_paths": 1294,
+  "pilot_n_steps": 3030,
+  "full_n_steps": 11089,
+  "n_vol_bins": 30,
+  "min_empirical_bin_events": 20,
+  "min_simulated_bin_events": 5,
+  "seed": 12345,
+  "initial_params": {
+    "a": 1.2972859101860943,
+    "b": 3.519292070348412,
+    "aa": 2.7796463396634854,
+    "bb": 0.0126817566795884,
+    "cc": 0.9388211125287448,
+    "vstart": 0.0330844293766971
+  },
+  "run": {
+    "maxiter": 40,
+    "popsize": 8,
+    "workers": 8,
+    "polish": false,
+    "refine": false,
+    "skip_full_validation": false,
+    "plot_full": false,
+    "output_dir": "data/processed/heston_calibration/full_ensemble_un",
+    "figure_dir": "visualization/heston_calibration/full_ensemble_un"
+  }
+}

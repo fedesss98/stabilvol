@@ -138,7 +138,8 @@ class HestonCalibrationTests(unittest.TestCase):
             stage2 = pd.read_csv(root / "results" / "heston_calibration_parameters.csv")
             self.assertTrue(np.isfinite(stage1.loc[0, "pilot_loss"]))
             self.assertTrue(np.isfinite(stage2.loc[0, "pilot_loss"]))
-            self.assertAlmostEqual(stage2.loc[0, "threshold_sigma"], returns.std().mean())
+            self.assertAlmostEqual(stage2.loc[0, "threshold_sigma"],
+                                   np.std(returns.to_numpy(), ddof=0))
             self.assertTrue((root / "figures" / "UN" / "UN_stage1_returns_pdf.png").is_file())
             self.assertTrue((root / "figures" / "UN" / "UN_m0p1_m1p5_mfht.csv").is_file())
 
@@ -159,6 +160,8 @@ class HestonCalibrationTests(unittest.TestCase):
             self.assertEqual(calibrator.market_shape("UN"), (3, 2))
             self.assertAlmostEqual(target.mean, 2.0)
             self.assertAlmostEqual(target.std, 2.0)
+            self.assertAlmostEqual(calibrator.empirical_collective_sigma("UN"),
+                                   np.std(returns[["a", "b"]].to_numpy(), ddof=0))
             self.assertEqual(target.n_series, 1)
             self.assertAlmostEqual(calibrator.return_moment_loss(returns[["a"]], target), 0.0)
             self.assertGreater(calibrator.return_moment_loss(returns[["a"]] * 2, target), 0.0)
