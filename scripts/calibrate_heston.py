@@ -227,20 +227,21 @@ def plot_returns_pdf(
     output_path: Path,
     *,
     market: str,
+    bins: int = 240,
 ) -> None:
     empirical = finite_values(empirical_returns)
     simulated = finite_values(simulated_returns)
     if empirical.size == 0 or simulated.size == 0:
         return
 
-    edges = shared_edges(empirical, simulated, bins=120, lower_q=0.001, upper_q=0.999)
+    edges = shared_edges(empirical, simulated, bins=bins, lower_q=0.001, upper_q=0.999)
     empirical = empirical[(empirical >= edges[0]) & (empirical <= edges[-1])]
     simulated = simulated[(simulated >= edges[0]) & (simulated <= edges[-1])]
 
     fig, ax = plt.subplots(figsize=(7, 4), layout="constrained")
     ax.hist(empirical, bins=edges, density=True, histtype="step", linewidth=1.8, label=f"Empirical ({empirical_returns.shape[1]} stocks)")
     ax.hist(simulated, bins=edges, density=True, histtype="step", linewidth=1.8, label=f"Synthetic ({simulated_returns.shape[1]} paths)")
-    ax.set_title(f"{market} return PDF")
+    ax.set_title(f"{market} return PDF ({bins} bins)")
     ax.set_xlabel("Return")
     ax.set_ylabel("Density")
     ax.legend()

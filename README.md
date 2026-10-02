@@ -205,6 +205,8 @@ Stage-one parameters and losses are saved in
 `data/processed/heston_calibration/staged_un/heston_calibration_stage1_parameters*.csv`.
 Its independent-seed return comparison is
 `visualization/heston_calibration/staged_un/UN/UN_stage1_returns_pdf.png`.
+Return-PDF comparison plots use 240 equal-width bins by default; this affects
+only the display and does not change the calibration loss.
 The usual parameter and output CSVs contain the second-stage fit, its fixed
 threshold scale, and return and MFHT diagnostic losses from an independent
 plotting seed. The plots and MFHT comparison CSV go to
