@@ -111,6 +111,7 @@ def print_result(record: dict[str, object]) -> None:
             f"synthetic mean={record['synthetic_average_mean']:.6g}, "
             f"synthetic std={record['synthetic_average_std']:.6g}"
         )
+    if "plot_mfht_loss" in record and "plot_return_loss" in record:
         print(f"  plot losses: MFHT={record['plot_mfht_loss']:.6g}, returns={record['plot_return_loss']:.6g}")
     print(f"  elapsed_seconds: {record['elapsed_seconds']:.3f}")
 
@@ -153,6 +154,9 @@ def build_config(args: argparse.Namespace, config_data: dict) -> CalibrationConf
         pilot_max_paths=args.pilot_paths if args.pilot_paths is not None else config_data.get("pilot_max_paths", defaults.pilot_max_paths),
         pilot_n_steps=args.pilot_steps if args.pilot_steps is not None else config_data.get("pilot_n_steps", defaults.pilot_n_steps),
         full_n_steps=args.full_steps if args.full_steps is not None else config_data.get("full_n_steps", defaults.full_n_steps),
+        sampling_interval_steps=config_data.get("sampling_interval_steps", defaults.sampling_interval_steps),
+        sampling_burn_in_steps=config_data.get("sampling_burn_in_steps", defaults.sampling_burn_in_steps),
+        sampling_return_mode=config_data.get("sampling_return_mode", defaults.sampling_return_mode),
         n_vol_bins=args.vol_bins if args.vol_bins is not None else config_data.get("n_vol_bins", defaults.n_vol_bins),
         event_count_weight=config_data.get("event_count_weight", defaults.event_count_weight),
         empty_penalty=config_data.get("empty_penalty", defaults.empty_penalty),
@@ -205,6 +209,15 @@ def finite_values(frame: pd.DataFrame, columns: int | None = None) -> np.ndarray
         frame = frame.iloc[:, :columns]
     values = frame.to_numpy(dtype=float, copy=False).ravel()
     return values[np.isfinite(values)]
+
+
+def near_zero_masses(frame: pd.DataFrame, width: float = 0.0025) -> tuple[float, float]:
+    values = finite_values(frame)
+    if values.size == 0:
+        return float("nan"), float("nan")
+    nonzero = values[values != 0]
+    return (float(np.mean(np.abs(values) <= width)),
+            float(np.mean(np.abs(nonzero) <= width)) if nonzero.size else float("nan"))
 
 
 def shared_edges(first: np.ndarray, second: np.ndarray, *, bins: int, lower_q: float, upper_q: float) -> np.ndarray:
@@ -308,6 +321,9 @@ def plot_market_comparisons(
         SimulationConfig(
             n_paths=n_paths,
             n_steps=n_steps,
+            sample_every=calibrator.config.sampling_interval_steps,
+            burn_in_steps=calibrator.config.sampling_burn_in_steps,
+            return_mode=calibrator.config.sampling_return_mode,
             seed=seed,
             correlated_noise=calibrator.config.correlated_noise,
             store_state=False,
@@ -483,6 +499,8 @@ def main() -> None:
         f"max_paths={config.pilot_max_paths}, steps={config.pilot_n_steps}, "
         f"vol_bins={config.n_vol_bins}"
     )
+    print(f"  sampling: every={config.sampling_interval_steps}dt, "
+          f"burn_in_steps={config.sampling_burn_in_steps}, mode={config.sampling_return_mode}")
     if not run_options.evaluate_default:
         estimated_evals = estimated_differential_evolution_evaluations(
             run_options.maxiter,
@@ -537,6 +555,9 @@ def main() -> None:
                         SimulationConfig(
                             n_paths=min(config.pilot_max_paths, n_market_stocks),
                             n_steps=config.pilot_n_steps,
+                            sample_every=config.sampling_interval_steps,
+                            burn_in_steps=config.sampling_burn_in_steps,
+                            return_mode=config.sampling_return_mode,
                             seed=config.seed + 200_000,
                             correlated_noise=config.correlated_noise,
                             store_state=False,
@@ -635,6 +656,9 @@ def main() -> None:
             **prefixed_moments("empirical_return", empirical_returns),
             **prefixed_moments("synthetic_return", synthetic_returns),
         }
+        empirical_near_zero, empirical_nonzero_near_zero = near_zero_masses(empirical_returns)
+        synthetic_near_zero, synthetic_nonzero_near_zero = near_zero_masses(synthetic_returns)
+        return_target = calibrator.empirical_return_target(market)
         market_elapsed = time.perf_counter() - market_start
         result_record.update(
             {
@@ -644,6 +668,9 @@ def main() -> None:
                 "empirical_source": market_config.empirical_source,
                 "threshold_sigma": market_config.threshold_sigma,
                 "return_loss_weight": market_config.return_loss_weight,
+                "sampling_interval_steps": market_config.sampling_interval_steps,
+                "sampling_burn_in_steps": market_config.sampling_burn_in_steps,
+                "sampling_return_mode": market_config.sampling_return_mode,
                 "correlated_noise": config.correlated_noise,
                 "optimized_parameters": ",".join(calibrator.parameter_names()),
                 "config_json": str(args.config_json) if args.config_json else None,
@@ -657,6 +684,14 @@ def main() -> None:
                 "skip_full_validation": run_options.skip_full_validation,
                 "plot_full": run_options.plot_full,
                 "elapsed_seconds": market_elapsed,
+                "empirical_average_mean": return_target.mean,
+                "empirical_average_std": return_target.std,
+                "synthetic_average_mean": float(synthetic_returns.mean(axis=0).mean()),
+                "synthetic_average_std": float(synthetic_returns.std(axis=0).mean()),
+                "empirical_mass_abs_le_0p0025": empirical_near_zero,
+                "synthetic_mass_abs_le_0p0025": synthetic_near_zero,
+                "empirical_nonzero_mass_abs_le_0p0025": empirical_nonzero_near_zero,
+                "synthetic_nonzero_mass_abs_le_0p0025": synthetic_nonzero_near_zero,
                 **moment_record,
             }
         )
@@ -679,6 +714,9 @@ def main() -> None:
                 "empirical_source": market_config.empirical_source,
                 "threshold_sigma": market_config.threshold_sigma,
                 "return_loss_weight": market_config.return_loss_weight,
+                "sampling_interval_steps": market_config.sampling_interval_steps,
+                "sampling_burn_in_steps": market_config.sampling_burn_in_steps,
+                "sampling_return_mode": market_config.sampling_return_mode,
                 "correlated_noise": config.correlated_noise,
                 "optimized_parameters": ",".join(calibrator.parameter_names()),
                 "config_json": str(args.config_json) if args.config_json else None,

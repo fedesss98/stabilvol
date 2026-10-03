@@ -40,6 +40,9 @@ class SimulationConfig:
 
     n_paths: int
     n_steps: int
+    sample_every: int = 1
+    burn_in_steps: int = 0
+    return_mode: str = "pre_reset_step"
     seed: Optional[int] = None
     variance_scheme: str = "redraw"
     correlated_noise: bool = False
@@ -53,11 +56,12 @@ class SimulationConfig:
 
 @dataclass
 class SimulationResult:
-    """Model paths and daily log-return increments.
+    """Model paths and observed log-return increments.
 
-    ``x`` stores the post-reset state. On a reset step, ``returns`` records
-    the increment before the restart, as in the supplied Fortran model; the
-    difference of consecutive stored ``x`` values then includes the reset.
+    ``x`` stores the post-reset state at observation times. With the default
+    pre_reset_step mode, ``returns`` records the final Euler increment before
+    a reset, as in the supplied Fortran model. In sampled_x mode, returns are
+    differences of observed post-reset states and include any reset jump.
     """
 
     returns: pd.DataFrame
@@ -75,6 +79,9 @@ class SimulationResult:
             {
                 "n_paths": self.config.n_paths,
                 "n_steps": self.config.n_steps,
+                "sample_every": self.config.sample_every,
+                "burn_in_steps": self.config.burn_in_steps,
+                "return_mode": self.config.return_mode,
                 "seed": self.config.seed,
                 "variance_scheme": self.config.variance_scheme,
                 "correlated_noise": self.config.correlated_noise,
@@ -96,6 +103,12 @@ def dU_dx(a: float, b: float, x: np.ndarray) -> np.ndarray:
 def _validate_inputs(params: HestonParams, config: SimulationConfig) -> None:
     if config.n_paths <= 0 or config.n_steps <= 0:
         raise ValueError("n_paths and n_steps must be positive")
+    if config.sample_every <= 0 or config.burn_in_steps < 0:
+        raise ValueError("sample_every must be positive and burn_in_steps nonnegative")
+    if config.return_mode not in ("pre_reset_step", "sampled_x"):
+        raise ValueError("return_mode must be pre_reset_step or sampled_x")
+    if config.sample_every != 1 and config.return_mode != "sampled_x":
+        raise ValueError("sample_every > 1 requires return_mode='sampled_x'")
     if config.variance_scheme != "redraw":
         raise ValueError("Only variance_scheme='redraw' is implemented")
     if params.dt <= 0:
@@ -154,10 +167,11 @@ def simulate_modified_heston(
     *,
     keep_shocks: bool = False,
 ) -> SimulationResult:
-    """Simulate independent log-price paths and their daily log increments.
+    """Simulate independent log-price paths and their observed increments.
 
-    Each column is one path of x(t) = log[p(t)/p(0)]. ``returns`` contains
-    x(t) - x(t-1) before the model's escape/reset rule is applied.
+    Each column is one path of x(t) = log[p(t)/p(0)]. By default, one Euler
+    step produces one pre-reset return. With sampled_x mode, each return is
+    the endpoint difference across sample_every Euler steps.
     """
 
     _validate_inputs(params, config)
@@ -172,7 +186,10 @@ def simulate_modified_heston(
     price_shocks = np.empty_like(returns) if keep_shocks else None
     variance_shocks = np.empty_like(returns) if keep_shocks else None
 
-    for step in range(config.n_steps):
+    last_sampled_x = current_x.copy()
+    observed_step = 0
+    total_internal_steps = config.burn_in_steps + config.n_steps * config.sample_every
+    for internal_step in range(total_internal_steps):
         z_price = rng.standard_normal(config.n_paths)
         sqrt_variance_dt = np.sqrt(np.maximum(current_variance, 0.0) * params.dt)
         next_x = (
@@ -189,16 +206,26 @@ def simulate_modified_heston(
         if not np.all(np.isfinite(step_returns)) or not np.all(np.isfinite(next_x)) or not np.all(np.isfinite(next_variance)):
             raise SimulationError("simulation produced non-finite values")
 
-        returns[step] = step_returns
-        if config.store_state:
-            x_values[step] = next_x
-            variance_values[step] = next_variance
-        if keep_shocks:
-            price_shocks[step] = z_price
-            variance_shocks[step] = z_vol
-
         current_x = next_x
         current_variance = next_variance
+        if internal_step < config.burn_in_steps:
+            if internal_step == config.burn_in_steps - 1:
+                last_sampled_x = current_x.copy()
+            continue
+        if (internal_step - config.burn_in_steps + 1) % config.sample_every:
+            continue
+
+        returns[observed_step] = (
+            step_returns if config.return_mode == "pre_reset_step" else current_x - last_sampled_x
+        )
+        if config.store_state:
+            x_values[observed_step] = current_x
+            variance_values[observed_step] = current_variance
+        if keep_shocks:
+            price_shocks[observed_step] = z_price
+            variance_shocks[observed_step] = z_vol
+        last_sampled_x = current_x.copy()
+        observed_step += 1
 
     index = pd.date_range(config.start_date, periods=config.n_steps, freq=config.frequency)
     columns = [f"{config.column_prefix}_{i:05d}" for i in range(config.n_paths)]

@@ -59,6 +59,37 @@ class HestonSimulationTests(unittest.TestCase):
         corr = np.corrcoef(result.price_shocks.ravel(), result.variance_shocks.ravel())[0, 1]
         self.assertGreater(corr, 0.6)
 
+    def test_sampled_returns_use_endpoint_states_after_burn_in(self):
+        params = HestonParams(reset_threshold=-1e6)
+        fine = simulate_modified_heston(
+            params, SimulationConfig(n_paths=4, n_steps=23, seed=17),
+        )
+        sampled = simulate_modified_heston(
+            params, SimulationConfig(n_paths=4, n_steps=5, seed=17,
+                                     sample_every=4, burn_in_steps=3,
+                                     return_mode="sampled_x"),
+        )
+        observed = fine.x[6::4]
+        np.testing.assert_allclose(sampled.x, observed)
+        np.testing.assert_allclose(
+            sampled.returns.to_numpy(),
+            np.diff(np.vstack((fine.x[2:3], observed)), axis=0),
+        )
+
+    def test_sampled_returns_include_reset_jump(self):
+        params = HestonParams(reset_threshold=0.0)
+        fine = simulate_modified_heston(
+            params, SimulationConfig(n_paths=16, n_steps=6, seed=42),
+        )
+        sampled = simulate_modified_heston(
+            params, SimulationConfig(n_paths=16, n_steps=3, seed=42,
+                                     sample_every=2, return_mode="sampled_x"),
+        )
+        np.testing.assert_allclose(
+            sampled.returns.to_numpy(),
+            np.diff(np.vstack((np.zeros((1, 16)), fine.x[1::2])), axis=0),
+        )
+
 
 class HestonCountingTests(unittest.TestCase):
     def test_simulated_returns_work_with_stabilvolter(self):
@@ -111,6 +142,50 @@ class HestonCountingTests(unittest.TestCase):
 
 
 class HestonCalibrationTests(unittest.TestCase):
+    def test_return_objective_uses_configured_sampling_interval(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "data" / "interim").mkdir(parents=True)
+            params = HestonParams(reset_threshold=-1e6)
+            simulation = simulate_modified_heston(
+                params, SimulationConfig(n_paths=8, n_steps=40, seed=17,
+                                         sample_every=3, burn_in_steps=5,
+                                         return_mode="sampled_x", column_prefix="UN"),
+            )
+            simulation.returns.to_pickle(root / "data" / "interim" / "UN.pickle")
+            config = CalibrationConfig(root=root, markets=("UN",), loss_metric="return_moments",
+                                       sampling_interval_steps=3, sampling_burn_in_steps=5,
+                                       sampling_return_mode="sampled_x")
+            loss, simulated = HestonCalibrator(config).evaluate_params(
+                "UN", params, n_paths=8, n_steps=40, seed=17,
+            )
+            self.assertAlmostEqual(loss, 0.0)
+            pd.testing.assert_frame_equal(simulated, simulation.returns)
+
+    def test_sampled_fit_validates_with_independent_seed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "data" / "interim").mkdir(parents=True)
+            params = HestonParams(reset_threshold=-1e6)
+            empirical = simulate_modified_heston(
+                params, SimulationConfig(n_paths=8, n_steps=40, seed=3,
+                                         sample_every=2, return_mode="sampled_x"),
+            ).returns
+            empirical.to_pickle(root / "data" / "interim" / "UN.pickle")
+            config = CalibrationConfig(root=root, markets=("UN",), loss_metric="return_moments",
+                                       pilot_max_paths=8, pilot_n_steps=20, full_n_steps=40,
+                                       sampling_interval_steps=2,
+                                       sampling_return_mode="sampled_x")
+            calibrator = HestonCalibrator(config)
+            result = calibrator.calibrate_market("UN", maxiter=0, popsize=1,
+                                                workers=1, validate_full=True,
+                                                progress=False)
+            seed = config.seed + sum((index + 1) * ord(char) for index, char in enumerate("UN"))
+            expected, _ = calibrator.evaluate_params(
+                "UN", result.params, n_paths=8, n_steps=40, seed=seed + 100_000,
+            )
+            self.assertAlmostEqual(result.validation_loss, expected)
+
     def test_staged_run_saves_both_fits_on_small_synthetic_data(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

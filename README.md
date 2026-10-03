@@ -227,6 +227,56 @@ The earlier `20261001_134240` staged run used the average per-stock standard
 deviation as its threshold scale. Its saved losses therefore are not directly
 comparable to losses from the collective-scale refinement.
 
+### Sampling interval sweep
+
+Use `scripts/sweep_heston_sampling.py` to keep the fitted parameters and Euler
+step `dt` fixed while observing each simulated `x` path every 1, 2, 5, or 10
+internal steps. For a first check with the saved staged parameters:
+
+```bash
+uv run python scripts/sweep_heston_sampling.py --parameters data/processed/heston_calibration/staged_un/heston_calibration_parameters.csv --paths 64 --days 3030 --intervals 1 2 5 10
+```
+
+For the full-ensemble fit, point `--parameters` to its parameter CSV on the
+workstation. Each interval produces 3030 observed returns per path, using the
+same random trajectory and a 1000-step burn-in. The CSV reports return moments,
+the fraction of returns inside fixed windows around zero (also conditional on
+nonzero returns), MFHT loss, and the existing combined loss. Return-PDF plots
+are saved alongside the CSV in `data/processed/heston_calibration/sampling_sweep/`.
+This is a diagnostic sweep, not a parameter refit. It uses differences of the
+sampled post-reset `x` states; any interval containing a reset includes its
+jump. The script prints the reset count so this convention is visible.
+
+To **refit the model separately** for each observation interval, run:
+
+```bash
+uv run python scripts/calibrate_heston_sampling_sweep.py --config-json configs/heston_un_full_ensemble_refine.json --intervals 1 2 5 10
+```
+
+The runner writes four interval-specific configs and calls the normal
+calibrator once per interval. In each objective evaluation, it evolves `x`
+for `k` Euler steps per observed day, takes endpoint differences of the
+sampled `x`, and computes the same return-moment and MFHT losses. It uses a
+1000-step burn-in for every interval, the same empirical targets and parameter
+bounds, and an independent full-length validation seed. The return-PDF plots
+and parameter CSVs are separated under `interval_1`, `interval_2`, `interval_5`,
+and `interval_10`. The aggregate parameter/loss table is
+`data/processed/heston_calibration/sampling_fit_sweep/UN_sampling_fit_sweep.csv`.
+Its columns include the empirical and simulated fractions of daily returns
+within `±0.0025`, with an additional fraction conditional on nonzero returns.
+This near-zero fraction is a diagnostic and is not part of the fit loss.
+
+For a quick pipeline check before the costly full sweep, run:
+
+```bash
+uv run python scripts/calibrate_heston_sampling_sweep.py --intervals 1 --pilot-paths 8 --pilot-steps 80 --maxiter 0 --popsize 1 --workers 1 --skip-full-validation
+```
+
+To seed every interval from a newer fit, pass
+`--initial-parameters PATH_TO_PARAMETERS_CSV`. The complete
+four-interval sweep can take many hours, especially at `10dt`, because each
+candidate then uses about ten times as many Euler steps as the `1dt` fit.
+
 ### Slurm cluster run
 
 The cluster batch files set `repo_root=/data/qmla/famato/stabilvol` and use fixed paths below it. Stage this working tree, the SQLite file at `data/processed/trapezoidal_selection/stabilvol_filtered.sqlite`, and the market pickles under `data/interim/`. The smoke and pilot jobs need `UN.pickle`; the full four-market job also needs `UW.pickle`, `LN.pickle`, and `JT.pickle`. Data and the newly added batch files are not automatically available from an older Git checkout.

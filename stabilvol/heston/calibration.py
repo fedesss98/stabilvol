@@ -54,6 +54,9 @@ class CalibrationConfig:
     pilot_max_paths: int = 512
     pilot_n_steps: int = 3030
     full_n_steps: int = 11089
+    sampling_interval_steps: int = 1
+    sampling_burn_in_steps: int = 0
+    sampling_return_mode: str = "pre_reset_step"
     n_vol_bins: int = 40
     event_count_weight: float = 0.1
     empty_penalty: float = 10.0
@@ -89,6 +92,12 @@ class CalibrationConfig:
             raise ValueError("bin counts and minimum events per bin must be positive")
         if self.min_empirical_observations < 0:
             raise ValueError("min_empirical_observations must be nonnegative")
+        if self.sampling_interval_steps < 1 or self.sampling_burn_in_steps < 0:
+            raise ValueError("sampling interval must be positive and burn-in nonnegative")
+        if self.sampling_return_mode not in ("pre_reset_step", "sampled_x"):
+            raise ValueError("sampling_return_mode must be pre_reset_step or sampled_x")
+        if self.sampling_interval_steps > 1 and self.sampling_return_mode != "sampled_x":
+            raise ValueError("sampling intervals above one require sampled_x returns")
         if self.event_count_weight < 0 or self.empty_penalty <= 0:
             raise ValueError("event_count_weight must be nonnegative and empty_penalty positive")
 
@@ -508,6 +517,9 @@ class HestonCalibrator:
             sim_config = SimulationConfig(
                 n_paths=n_paths,
                 n_steps=n_steps,
+                sample_every=self.config.sampling_interval_steps,
+                burn_in_steps=self.config.sampling_burn_in_steps,
+                return_mode=self.config.sampling_return_mode,
                 seed=seed,
                 correlated_noise=self.config.correlated_noise,
                 store_state=False,
@@ -623,6 +635,9 @@ class HestonCalibrator:
                     SimulationConfig(
                         n_paths=n_market_stocks,
                         n_steps=self.config.full_n_steps,
+                        sample_every=self.config.sampling_interval_steps,
+                        burn_in_steps=self.config.sampling_burn_in_steps,
+                        return_mode=self.config.sampling_return_mode,
                         seed=validation_seed,
                         correlated_noise=self.config.correlated_noise,
                         store_state=False,
@@ -674,6 +689,9 @@ class HestonCalibrator:
             SimulationConfig(
                 n_paths=n_paths,
                 n_steps=n_steps,
+                sample_every=self.config.sampling_interval_steps,
+                burn_in_steps=self.config.sampling_burn_in_steps,
+                return_mode=self.config.sampling_return_mode,
                 seed=seed,
                 correlated_noise=self.config.correlated_noise,
                 store_state=False,
