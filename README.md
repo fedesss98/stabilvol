@@ -277,6 +277,105 @@ To seed every interval from a newer fit, pass
 four-interval sweep can take many hours, especially at `10dt`, because each
 candidate then uses about ten times as many Euler steps as the `1dt` fit.
 
+To save the synthetic time series from completed sweep fits without repeating
+optimization, run:
+
+```bash
+uv run python scripts/export_heston_sampling_series.py --kind plot
+```
+
+This reproduces the independently seeded series used for each return-PDF plot
+and writes `UN_synthetic_returns_plot.pkl` inside each interval's processed
+output folder. Use `--kind validation` for the longer full-validation series,
+or `--states` to also save the sampled log-price state `x` and variance arrays.
+The exporter verifies reproduced plot return moments against the saved result.
+Open the pickles with `pandas.read_pickle`; the calibration's original
+empirical returns remain in `data/interim/UN.pickle`. The analysis notebook can
+redraw the return PDFs with a different bin count after the pickles are copied.
+
+### Four-market sampling fits and final ensembles
+
+On the workstation, fit each of `UN`, `UW`, `LN`, and `JT` separately at four
+sampling intervals:
+
+```bash
+uv run python scripts/calibrate_heston_four_market_sweep.py --markets UN UW LN JT --intervals 1 2 5 10 --workers 8
+```
+
+The driver derives one threshold sigma and one full selected-stock path count
+per market from `data/interim/<MARKET>.pickle` using the 3030-observation rule.
+To prevent rare extreme returns from making the thresholds unusable, it clips
+the pooled selected returns to their market-specific 0.1% and 99.9% quantiles
+when calculating sigma. The original returns remain unchanged for fitting,
+event counting, and PDF comparison. The clipping bounds and sigma are saved in
+each market config.
+It applies the same `-0.1 sigma -> -1.5 sigma` threshold pair, retains the
+template's optimizer settings and 11089-day full validation, and writes each
+market's configs and parameter CSVs under
+`data/processed/heston_calibration/four_market_sampling_sweep/<MARKET>/`.
+Its MFHT and return-PDF figures go under
+`visualization/heston_calibration/four_market_sampling_sweep/<MARKET>/`.
+The other markets do not inherit UN's starting parameter vector. The fits run
+sequentially and may take many hours, particularly at `10dt`.
+
+For a cheap pipeline check, run the same driver with `--intervals 1 --workers 1
+--maxiter 0 --popsize 1 --pilot-paths 8 --pilot-steps 80 --full-steps 80
+--skip-full-validation` and separate `--output-dir` / `--figure-dir` paths.
+
+Copy the two `four_market_sampling_sweep` directories to the same locations
+locally, then open `notebooks/25-heston-sampling-calibration.ipynb`. Review
+validation losses, return PDFs, and MFHT bin coverage. In its selection cell,
+enter one sampling interval for each market. The notebook writes
+`data/processed/heston_calibration/four_market_sampling_sweep/final_selection.json`;
+copy that small file back to the same workstation directory.
+
+On the workstation, run 10 independent full-length ensembles for the four
+selected fits and retain all return matrices:
+
+```bash
+uv run python scripts/heston_sampling_replicates.py --selection data/processed/heston_calibration/four_market_sampling_sweep/final_selection.json --replicates 10 --days 11089 --save-series
+```
+
+Before that full run, use `--replicates 2 --days 80 --paths 8 --output-dir
+data/processed/heston_calibration/four_market_replicate_smoke` to test the
+four-market data flow. Final outputs are under `replicate_variation`: one
+`replicate_metrics.csv` row per simulation, a `replicate_summary.csv` with
+across-run mean and sample standard deviation, and per-market PDF/FHT/MFHT
+bands as CSV and PNG. The return-PDF total-variation score includes tail bins;
+the Wasserstein score is calculated on reproducible samples of up to 200000
+raw returns per distribution to bound memory and runtime. Both scores are
+lower when distributions agree more closely. The plotted PDF range is fixed
+from the empirical 0.1% to 99.9% quantiles and normalized within that range.
+Copy the summary CSVs and band CSVs/PNGs locally for the notebook. Copy the
+large `*_returns_replicate_*.pkl` files only when rebinned analysis is needed.
+
+The `plot` series uses a separate seed and the plot path/day counts (usually
+the pilot counts); it is the realization shown in the calibration figures.
+The `validation` series uses another independent seed, the full selected-stock
+count, and `full_n_steps`; it is the realization scored by `validation_loss`.
+Both use the fitted parameters. A single plot or validation run gives no
+estimate of simulation-to-simulation variation.
+
+To measure that variation at fixed fitted parameters, simulate `M` independent
+ensembles for each completed interval:
+
+```bash
+uv run python scripts/heston_sampling_replicates.py --sweep-dir data/processed/heston_calibration/sampling_fit_sweep --market UN --replicates 10
+```
+
+By default, each ensemble has one path per selected empirical stock (1294 for
+the current UN selection) and `pilot_n_steps` observed days (3030 in the full
+config). Use `--days 11089` for validation-length runs. The output under
+`data/processed/heston_calibration/sampling_fit_sweep/replicate_variation/`
+contains per-run metrics, their across-run mean and sample standard deviation,
+and CSV/PNG mean ± standard-deviation bands for the return PDF, FHT PDF, and
+MFHT curve. The return PDF uses fixed empirical bin edges across runs, so its
+band is comparable. Add `--save-series` to retain each simulated return matrix
+for further binning experiments. These bands describe Monte Carlo variation
+with the fitted parameters held fixed; they do not include fit or empirical
+sampling uncertainty. For each interval `k`, runtime grows approximately with
+`M × N × days × k`.
+
 ### Slurm cluster run
 
 The cluster batch files set `repo_root=/data/qmla/famato/stabilvol` and use fixed paths below it. Stage this working tree, the SQLite file at `data/processed/trapezoidal_selection/stabilvol_filtered.sqlite`, and the market pickles under `data/interim/`. The smoke and pilot jobs need `UN.pickle`; the full four-market job also needs `UW.pickle`, `LN.pickle`, and `JT.pickle`. Data and the newly added batch files are not automatically available from an older Git checkout.
