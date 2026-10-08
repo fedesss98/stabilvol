@@ -329,11 +329,11 @@ enter one sampling interval for each market. The notebook writes
 `data/processed/heston_calibration/four_market_sampling_sweep/final_selection.json`;
 copy that small file back to the same workstation directory.
 
-On the workstation, run 10 independent full-length ensembles for the four
-selected fits and retain all return matrices:
+On the workstation, run 100 independent full-length ensembles for the four
+selected fits:
 
 ```bash
-uv run python scripts/heston_sampling_replicates.py --selection data/processed/heston_calibration/four_market_sampling_sweep/final_selection.json --replicates 10 --days 11089 --save-series
+uv run python scripts/heston_sampling_replicates.py --selection data/processed/heston_calibration/four_market_sampling_sweep/final_selection.json --replicates 100 --days 11089
 ```
 
 Before that full run, use `--replicates 2 --days 80 --paths 8 --output-dir
@@ -341,13 +341,22 @@ data/processed/heston_calibration/four_market_replicate_smoke` to test the
 four-market data flow. Final outputs are under `replicate_variation`: one
 `replicate_metrics.csv` row per simulation, a `replicate_summary.csv` with
 across-run mean and sample standard deviation, and per-market PDF/FHT/MFHT
-bands as CSV and PNG. The return-PDF total-variation score includes tail bins;
+bands as CSV and PNG. Both zero-inclusive and exact-zero-excluded return-PDF
+bands are computed during each simulation and saved without retaining the
+full series. The zero-excluded band uses symmetric bins with zero on a bin
+boundary, and its density is conditional on nonzero returns inside the plotted
+range. The notebook uses this band and its separate nonzero total-variation
+score. The zero-inclusive return-PDF total-variation score includes tail bins;
 the Wasserstein score is calculated on reproducible samples of up to 200000
 raw returns per distribution to bound memory and runtime. Both scores are
 lower when distributions agree more closely. The plotted PDF range is fixed
 from the empirical 0.1% to 99.9% quantiles and normalized within that range.
-Copy the summary CSVs and band CSVs/PNGs locally for the notebook. Copy the
-large `*_returns_replicate_*.pkl` files only when rebinned analysis is needed.
+Copy the summary CSVs and band CSVs/PNGs locally for the notebook. Use
+`--save-series` only if you need to experiment with new bins later; at 100
+full-length replicates this would create roughly 53 GB of raw float64 return
+values across the four markets, before pickle overhead. Choose `--bins`
+before the run; without saved series, changing the bin edges later requires
+rerunning the simulations.
 
 The `plot` series uses a separate seed and the plot path/day counts (usually
 the pilot counts); it is the realization shown in the calibration figures.

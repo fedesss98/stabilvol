@@ -87,6 +87,15 @@ def run_fit(args: argparse.Namespace, market: str, interval: int, sweep: Path, o
     widths = np.diff(edges)
     empirical_inside, empirical_prob = probabilities(empirical_values, edges)
     empirical_density = empirical_inside / (empirical_inside.sum() * widths)
+    empirical_nonzero = empirical_values[empirical_values != 0]
+    zero_bins = args.bins + args.bins % 2
+    span = float(max(abs(np.quantile(empirical_nonzero, 0.001)),
+                     abs(np.quantile(empirical_nonzero, 0.999))))
+    zero_edges = np.linspace(-span, span, zero_bins + 1)
+    zero_edges[zero_bins // 2] = 0.0
+    zero_widths = np.diff(zero_edges)
+    empirical_zero_inside, empirical_zero_prob = probabilities(empirical_nonzero, zero_edges)
+    empirical_zero_density = empirical_zero_inside / (empirical_zero_inside.sum() * zero_widths)
     pair = config.threshold_pairs[0]
     empirical_events = calibrator.load_empirical_events(market, pair)
     curve_target = calibrator.prepare_curve_target(empirical_events)
@@ -97,7 +106,7 @@ def run_fit(args: argparse.Namespace, market: str, interval: int, sweep: Path, o
     market_offset = int.from_bytes(market.encode("ascii"), "big")
     empirical_rng = np.random.default_rng(config.seed + market_offset + 900_000)
     empirical_sample = empirical_rng.choice(empirical_values, size=min(args.wasserstein_sample, len(empirical_values)), replace=False)
-    pdfs, curves, fht_pdfs, rows = [], [], [], []
+    pdfs, nonzero_pdfs, curves, fht_pdfs, rows = [], [], [], [], []
     output.mkdir(parents=True, exist_ok=True)
     for replicate in range(1, args.replicates + 1):
         seed = config.seed + market_offset + 300_000 + replicate
@@ -115,6 +124,10 @@ def run_fit(args: argparse.Namespace, market: str, interval: int, sweep: Path, o
         finite = values[np.isfinite(values)]
         counts, model_prob = probabilities(finite, edges)
         pdfs.append(counts / (counts.sum() * widths) if counts.sum() else np.full(args.bins, np.nan))
+        synthetic_nonzero = finite[finite != 0]
+        zero_counts, zero_prob = probabilities(synthetic_nonzero, zero_edges)
+        nonzero_pdfs.append(zero_counts / (zero_counts.sum() * zero_widths)
+                            if zero_counts.sum() else np.full(zero_bins, np.nan))
         synthetic_rng = np.random.default_rng(seed + 600_000)
         synthetic_sample = synthetic_rng.choice(finite, size=min(args.wasserstein_sample, len(finite)), replace=False)
         events = calibrator.count_simulated_events(returns, pair, market)
@@ -131,7 +144,9 @@ def run_fit(args: argparse.Namespace, market: str, interval: int, sweep: Path, o
             "average_stock_std": float(values.std(axis=0, ddof=1).mean()),
             "pooled_mean": float(finite.mean()), "pooled_std": float(finite.std(ddof=1)),
             "near_zero_fraction_0p0025": float((np.abs(finite) <= 0.0025).mean()),
+            "exact_zero_fraction": float(np.mean(finite == 0)),
             "return_pdf_total_variation": float(0.5 * np.abs(model_prob - empirical_prob).sum()),
+            "return_pdf_nonzero_total_variation": float(0.5 * np.abs(zero_prob - empirical_zero_prob).sum()),
             "return_wasserstein_sampled": float(wasserstein_distance(empirical_sample, synthetic_sample)),
             "n_events": len(events), "return_loss": return_loss, "mfht_loss": mfht_loss,
             "combined_loss": mfht_loss + config.return_loss_weight * return_loss,
@@ -146,6 +161,17 @@ def run_fit(args: argparse.Namespace, market: str, interval: int, sweep: Path, o
     return_frame.to_csv(output / "return_pdf_band.csv", index=False)
     plot_band(return_frame, "return_midpoint", "empirical_density", output / "return_pdf_band.png",
               "Daily return", "Density", (-0.05, 0.05))
+    nonzero_mean, nonzero_std, _ = band(nonzero_pdfs)
+    nonzero_frame = pd.DataFrame({
+        "return_lower": zero_edges[:-1], "return_upper": zero_edges[1:],
+        "return_midpoint": (zero_edges[:-1] + zero_edges[1:]) / 2,
+        "empirical_density": empirical_zero_density, "synthetic_mean": nonzero_mean,
+        "synthetic_std": nonzero_std,
+    })
+    nonzero_frame.to_csv(output / "return_pdf_nonzero_band.csv", index=False)
+    plot_band(nonzero_frame, "return_midpoint", "empirical_density",
+              output / "return_pdf_nonzero_band.png", "Nonzero daily return",
+              "Conditional density", (-0.05, 0.05))
     curve_mean, curve_std, curve_count = band(curves)
     curve_frame = pd.DataFrame({
         "volatility_lower": curve_target.edges[:-1], "volatility_upper": curve_target.edges[1:],
@@ -167,7 +193,10 @@ def run_fit(args: argparse.Namespace, market: str, interval: int, sweep: Path, o
         "market": market, "interval_steps": interval, "replicates": args.replicates,
         "n_paths": n_paths, "n_days": n_days, "parameters_csv": str(parameters_path),
         "return_pdf_edges": "empirical 0.1% to 99.9% quantiles; displayed density conditional on this range",
+        "return_pdf_nonzero_edges": "symmetric empirical nonzero 0.1% to 99.9% span; zero is a bin boundary; density conditional on nonzero returns in range",
         "total_variation": "all returns, including below-range and above-range probability bins",
+        "nonzero_total_variation": "conditional on nonzero returns; includes below-range and above-range probability bins",
+        "empirical_exact_zero_fraction": float(np.mean(empirical_values == 0)),
         "wasserstein": f"exact W1 on deterministic samples of at most {args.wasserstein_sample} returns per distribution; raw daily-return units",
         "band": "sample standard deviation across independent simulations (ddof=1)",
         "uncertainty": "Monte Carlo variation at fixed fitted parameters",
@@ -219,7 +248,8 @@ def main() -> None:
     metrics = pd.DataFrame(rows)
     metrics.to_csv(output / "replicate_metrics.csv", index=False)
     columns = ["average_stock_mean", "average_stock_std", "pooled_mean", "pooled_std",
-               "near_zero_fraction_0p0025", "return_pdf_total_variation",
+               "near_zero_fraction_0p0025", "exact_zero_fraction", "return_pdf_total_variation",
+               "return_pdf_nonzero_total_variation",
                "return_wasserstein_sampled", "n_events", "return_loss", "mfht_loss", "combined_loss"]
     summary = metrics.groupby(["market", "interval_steps"], as_index=False)[columns].agg(["mean", "std"])
     summary.columns = [name if not stat else f"{name}_{stat}" for name, stat in summary.columns]
