@@ -34,6 +34,26 @@ def band(values: list[np.ndarray]) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     return mean, std, count
 
 
+def band_details(values: list[np.ndarray]) -> dict[str, np.ndarray]:
+    """Summarize every bin across realizations, ignoring uncovered MFHT bins."""
+    array = np.asarray(values, dtype=float)
+    mean, std, count = band(values)
+    median = np.full(array.shape[1], np.nan)
+    minimum = median.copy()
+    maximum = median.copy()
+    for index in range(array.shape[1]):
+        observed = array[np.isfinite(array[:, index]), index]
+        if observed.size:
+            median[index] = np.median(observed)
+            minimum[index] = observed.min()
+            maximum[index] = observed.max()
+    return {
+        "synthetic_mean": mean, "synthetic_std": std,
+        "synthetic_median": median, "synthetic_min": minimum,
+        "synthetic_max": maximum, "replicates_covered": count,
+    }
+
+
 def probabilities(values: np.ndarray, edges: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     inside = np.histogram(values, bins=edges)[0]
     all_counts = np.r_[np.count_nonzero(values < edges[0]), inside,
@@ -45,11 +65,17 @@ def plot_band(frame: pd.DataFrame, x: str, empirical: str, path: Path,
               xlabel: str, ylabel: str, xlim: tuple[float, float] | None = None) -> None:
     fig, ax = plt.subplots(figsize=(8, 4.5))
     xx = frame[x].to_numpy(dtype=float)
-    yy = frame.synthetic_mean.to_numpy(dtype=float)
-    sd = frame.synthetic_std.to_numpy(dtype=float)
     ax.plot(xx, frame[empirical], label="Empirical", color="C0")
-    ax.plot(xx, yy, label="Synthetic mean", color="C1")
-    ax.fill_between(xx, yy - sd, yy + sd, color="C1", alpha=0.25, label="Synthetic ±1 SD")
+    if {"synthetic_median", "synthetic_min", "synthetic_max"}.issubset(frame.columns):
+        ax.plot(xx, frame.synthetic_median, label="Synthetic median", color="C1")
+        ax.fill_between(xx, frame.synthetic_min.to_numpy(dtype=float),
+                        frame.synthetic_max.to_numpy(dtype=float), color="C1", alpha=0.25,
+                        label="Synthetic min–max")
+    else:
+        yy = frame.synthetic_mean.to_numpy(dtype=float)
+        sd = frame.synthetic_std.to_numpy(dtype=float)
+        ax.plot(xx, yy, label="Synthetic mean", color="C1")
+        ax.fill_between(xx, yy - sd, yy + sd, color="C1", alpha=0.25, label="Synthetic ±1 SD")
     ax.set(xlabel=xlabel, ylabel=ylabel)
     if xlim is not None:
         ax.set_xlim(*xlim)
@@ -151,42 +177,44 @@ def run_fit(args: argparse.Namespace, market: str, interval: int, sweep: Path, o
             "n_events": len(events), "return_loss": return_loss, "mfht_loss": mfht_loss,
             "combined_loss": mfht_loss + config.return_loss_weight * return_loss,
         })
-    pdf_mean, pdf_std, _ = band(pdfs)
+    seeds = np.asarray([row["seed"] for row in rows], dtype=np.int64)
     return_frame = pd.DataFrame({
         "return_lower": edges[:-1], "return_upper": edges[1:],
         "return_midpoint": (edges[:-1] + edges[1:]) / 2,
-        "empirical_density": empirical_density, "synthetic_mean": pdf_mean,
-        "synthetic_std": pdf_std,
+        "empirical_density": empirical_density, **band_details(pdfs),
     })
     return_frame.to_csv(output / "return_pdf_band.csv", index=False)
+    np.savez_compressed(output / "return_pdf_replicates.npz", values=np.asarray(pdfs),
+                        edges=edges, replicate=np.arange(1, args.replicates + 1), seed=seeds)
     plot_band(return_frame, "return_midpoint", "empirical_density", output / "return_pdf_band.png",
               "Daily return", "Density", (-0.05, 0.05))
-    nonzero_mean, nonzero_std, _ = band(nonzero_pdfs)
     nonzero_frame = pd.DataFrame({
         "return_lower": zero_edges[:-1], "return_upper": zero_edges[1:],
         "return_midpoint": (zero_edges[:-1] + zero_edges[1:]) / 2,
-        "empirical_density": empirical_zero_density, "synthetic_mean": nonzero_mean,
-        "synthetic_std": nonzero_std,
+        "empirical_density": empirical_zero_density, **band_details(nonzero_pdfs),
     })
     nonzero_frame.to_csv(output / "return_pdf_nonzero_band.csv", index=False)
+    np.savez_compressed(output / "return_pdf_nonzero_replicates.npz", values=np.asarray(nonzero_pdfs),
+                        edges=zero_edges, replicate=np.arange(1, args.replicates + 1), seed=seeds)
     plot_band(nonzero_frame, "return_midpoint", "empirical_density",
               output / "return_pdf_nonzero_band.png", "Nonzero daily return",
               "Conditional density", (-0.05, 0.05))
-    curve_mean, curve_std, curve_count = band(curves)
     curve_frame = pd.DataFrame({
         "volatility_lower": curve_target.edges[:-1], "volatility_upper": curve_target.edges[1:],
         "volatility_midpoint": (curve_target.edges[:-1] + curve_target.edges[1:]) / 2,
         "empirical_events": curve_target.counts, "empirical_mfht": curve_target.mfht,
-        "fit_bin": curve_target.eligible, "synthetic_mean": curve_mean,
-        "synthetic_std": curve_std, "replicates_covered": curve_count,
+        "fit_bin": curve_target.eligible, **band_details(curves),
     })
     curve_frame.to_csv(output / "mfht_band.csv", index=False)
+    np.savez_compressed(output / "mfht_replicates.npz", values=np.asarray(curves),
+                        edges=curve_target.edges, replicate=np.arange(1, args.replicates + 1), seed=seeds)
     plot_band(curve_frame, "volatility_midpoint", "empirical_mfht", output / "mfht_band.png",
               "Local volatility", "MFHT")
-    fht_mean, fht_std, _ = band(fht_pdfs)
     fht_frame = pd.DataFrame({"fht": fht_days, "empirical_probability": empirical_fht,
-                              "synthetic_mean": fht_mean, "synthetic_std": fht_std})
+                              **band_details(fht_pdfs)})
     fht_frame.to_csv(output / "fht_pdf_band.csv", index=False)
+    np.savez_compressed(output / "fht_pdf_replicates.npz", values=np.asarray(fht_pdfs),
+                        fht=fht_days, replicate=np.arange(1, args.replicates + 1), seed=seeds)
     plot_band(fht_frame, "fht", "empirical_probability", output / "fht_pdf_band.png",
               "FHT (days)", "Probability")
     (output / "metadata.json").write_text(json.dumps({
@@ -197,8 +225,9 @@ def run_fit(args: argparse.Namespace, market: str, interval: int, sweep: Path, o
         "total_variation": "all returns, including below-range and above-range probability bins",
         "nonzero_total_variation": "conditional on nonzero returns; includes below-range and above-range probability bins",
         "empirical_exact_zero_fraction": float(np.mean(empirical_values == 0)),
+        "seed_rule": "config.seed + int.from_bytes(market.encode('ascii'), 'big') + 300000 + replicate",
         "wasserstein": f"exact W1 on deterministic samples of at most {args.wasserstein_sample} returns per distribution; raw daily-return units",
-        "band": "sample standard deviation across independent simulations (ddof=1)",
+        "band": "sample standard deviation (ddof=1), median, and exact min/max across independent simulations; MFHT bins use covered replicates only",
         "uncertainty": "Monte Carlo variation at fixed fitted parameters",
     }, indent=2) + "\n", encoding="utf-8")
     return rows

@@ -341,7 +341,10 @@ data/processed/heston_calibration/four_market_replicate_smoke` to test the
 four-market data flow. Final outputs are under `replicate_variation`: one
 `replicate_metrics.csv` row per simulation, a `replicate_summary.csv` with
 across-run mean and sample standard deviation, and per-market PDF/FHT/MFHT
-bands as CSV and PNG. Both zero-inclusive and exact-zero-excluded return-PDF
+bands as CSV and PNG. Each band CSV also contains the per-bin median, minimum,
+maximum, and number of contributing runs; compact `*_replicates.npz` files
+retain every per-run bin value without saving full return series. Both
+zero-inclusive and exact-zero-excluded return-PDF
 bands are computed during each simulation and saved without retaining the
 full series. The zero-excluded band uses symmetric bins with zero on a bin
 boundary, and its density is conditional on nonzero returns inside the plotted
@@ -357,6 +360,16 @@ full-length replicates this would create roughly 53 GB of raw float64 return
 values across the four markets, before pickle overhead. Choose `--bins`
 before the run; without saved series, changing the bin edges later requires
 rerunning the simulations.
+Older `replicate_variation` outputs with only mean and standard deviation
+cannot provide exact per-bin minima or maxima; regenerate them with the
+updated replicate script and a new `--output-dir` to preserve the first run:
+
+```bash
+uv run python scripts/heston_sampling_replicates.py --selection data/processed/heston_calibration/four_market_sampling_sweep/final_selection.json --replicates 100 --days 11089 --output-dir data/processed/heston_calibration/four_market_sampling_sweep/replicate_variation_range
+```
+
+After copying `replicate_variation_range` locally, the notebook uses it in
+preference to the earlier `replicate_variation` folder.
 
 The `plot` series uses a separate seed and the plot path/day counts (usually
 the pilot counts); it is the realization shown in the calibration figures.
