@@ -34,5 +34,13 @@
     "num_bin": 5000,
     "max_bin": 1000
   },
+  "empirical": {
+    "markets": ["UN", "UW", "LN", "JT"],
+    "returns_dir": "data/interim",
+    "start_date": "1980-01-01",
+    "end_date": "2022-07-01",
+    "min_observations": 2,
+    "missing_policy": "break"
+  },
   "output_dir": "data/processed/heston_fortran_reference"
 }

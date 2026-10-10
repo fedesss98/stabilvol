@@ -21,11 +21,57 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 
 from stabilvol.heston import HestonParams, SimulationConfig, simulate_modified_heston
 from stabilvol.heston.paper_reproduction import (
     count_fortran_hitting_events, fortran_mfht_curve, market_return_scale,
 )
+
+
+def count_empirical_market(
+    market: str, empirical: dict, counter: dict, binning: dict, output_dir: Path,
+) -> tuple[pd.DataFrame, dict]:
+    returns_dir = Path(empirical["returns_dir"])
+    if not returns_dir.is_absolute():
+        returns_dir = PROJECT_ROOT / returns_dir
+    returns_path = returns_dir / f"{market}.pickle"
+    returns = pd.read_pickle(returns_path).loc[empirical["start_date"]:empirical["end_date"]]
+    if returns.empty:
+        raise ValueError(f"no returns for {market} in the requested date range")
+    observed = returns.notna().sum(axis=0)
+    returns = returns.loc[:, observed >= empirical["min_observations"]]
+    if returns.shape[1] == 0:
+        raise ValueError(f"no eligible return series for {market}")
+    values = returns.to_numpy(dtype=float, copy=False)
+    if np.isinf(values).any():
+        raise ValueError(f"infinite return in {returns_path}")
+    # calmG.f clips anomalies only for threshold normalization and crossing tests.
+    clipped = np.where(np.abs(values) > counter["anomaly_limit"], 0.0, values)
+    path_sigma = np.nanstd(clipped, axis=0, ddof=0)
+    path_sigma = path_sigma[np.isfinite(path_sigma)]
+    sigma_bar = float(path_sigma.mean())
+    if not np.isfinite(sigma_bar) or sigma_bar <= 0:
+        raise ValueError(f"invalid pooled Fortran scale for {market}")
+    events = count_fortran_hitting_events(
+        values, sigma_bar, direction="crash", missing_policy=empirical["missing_policy"], **counter,
+    )
+    curve = fortran_mfht_curve(events, **binning)
+    events.to_csv(output_dir / f"{market}_crash_events.csv.gz", index=False)
+    curve.to_csv(output_dir / f"{market}_crash_mfht.csv", index=False)
+    summary = {
+        "returns_path": str(returns_path),
+        "start_date": str(returns.index.min().date()),
+        "end_date": str(returns.index.max().date()),
+        "paths": int(returns.shape[1]),
+        "days": int(returns.shape[0]),
+        "missing_observations": int(np.isnan(values).sum()),
+        "missing_policy": empirical["missing_policy"],
+        "sigma_bar": sigma_bar,
+        "events": len(events),
+        "events_in_mfht_bins": int(curve["events"].sum()),
+    }
+    return curve, summary
 
 
 def main() -> None:
@@ -35,6 +81,8 @@ def main() -> None:
     parser.add_argument("--steps", type=int, help="Override recorded steps for a quick trial")
     parser.add_argument("--seed", type=int, help="Override NumPy seed")
     parser.add_argument("--output-dir", type=Path)
+    parser.add_argument("--markets", nargs="+", help="Empirical markets; default from config")
+    parser.add_argument("--synthetic-only", action="store_true", help="Skip empirical return counting")
     args = parser.parse_args()
 
     with args.config.open(encoding="utf-8") as handle:
@@ -77,6 +125,18 @@ def main() -> None:
     events.to_csv(output_dir / "crash_events.csv.gz", index=False)
     curve.to_csv(output_dir / "crash_mfht.csv", index=False)
 
+    empirical = config["empirical"]
+    if empirical["missing_policy"] != "break":
+        parser.error("real returns require missing_policy='break' to preserve calendar gaps")
+    market_curves = {}
+    market_summaries = {}
+    if not args.synthetic_only:
+        for market in (args.markets or empirical["markets"]):
+            market_curves[market], market_summaries[market] = count_empirical_market(
+                market, empirical, counter, config["binning"], output_dir,
+            )
+            print(f"{market}: {market_summaries[market]['events']} real crash events", flush=True)
+
     shown = curve.loc[curve["events"] >= 10]
     fig, axes = plt.subplots(1, 2, figsize=(11, 4), sharey=True, layout="constrained")
     physical = (shown["physical_volatility_lower"] + shown["physical_volatility_upper"]) / 2
@@ -90,6 +150,24 @@ def main() -> None:
     fig.savefig(output_dir / "crash_mfht_axes.png", dpi=180)
     plt.close(fig)
 
+    if market_curves:
+        fig, axes = plt.subplots(len(market_curves), 2, figsize=(11, 3.5 * len(market_curves)),
+                                 squeeze=False, layout="constrained")
+        for row, (market, real_curve) in enumerate(market_curves.items()):
+            real_shown = real_curve.loc[real_curve["events"] >= 10]
+            for col, x_col in enumerate(("volatility", "physical")):
+                ax = axes[row, col]
+                for frame, label in ((shown, "Synthetic"), (real_shown, market)):
+                    x = (frame["volatility"] if x_col == "volatility" else
+                         (frame["physical_volatility_lower"] + frame["physical_volatility_upper"]) / 2)
+                    ax.scatter(x, frame["mfht"], s=9, label=label)
+                ax.set(xlabel="Fortran reported volatility" if col == 0 else "Physical local volatility",
+                       ylabel="MFHT (steps)", title=f"{market}: same counter and binning")
+                ax.legend()
+                ax.grid(alpha=0.2)
+        fig.savefig(output_dir / "synthetic_vs_empirical_crash_mfht.png", dpi=180)
+        plt.close(fig)
+
     summary = {
         "source": ["old_code/heston.f", "old_code/calmG.f", "old_code/parm.dat", "old_code/parmG.dat"],
         "config": str(args.config.resolve()),
@@ -100,7 +178,8 @@ def main() -> None:
         "sigma_bar": sigma_bar,
         "events": len(events),
         "events_in_mfht_bins": int(curve["events"].sum()),
-        "note": "NumPy RNG differs from Fortran; original calmG.f counts crashes only.",
+        "empirical": market_summaries,
+        "note": "NumPy RNG differs from Fortran; original calmG.f counts crashes only. Empirical missing days break episodes; original Fortran input was dense. Empirical returns are simple price changes; synthetic returns are model log increments.",
     }
     with (output_dir / "summary.json").open("w", encoding="utf-8") as handle:
         json.dump(summary, handle, indent=2)
