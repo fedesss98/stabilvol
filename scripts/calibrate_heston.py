@@ -113,6 +113,9 @@ def print_result(record: dict[str, object]) -> None:
         )
     if "plot_mfht_loss" in record and "plot_return_loss" in record:
         print(f"  plot losses: MFHT={record['plot_mfht_loss']:.6g}, returns={record['plot_return_loss']:.6g}")
+    if "plot_conditional_fht_loss" in record:
+        print(f"  plot losses: conditional FHT={record['plot_conditional_fht_loss']:.6g}, "
+              f"nonzero returns={record['plot_nonzero_return_loss']:.6g}")
     print(f"  elapsed_seconds: {record['elapsed_seconds']:.3f}")
 
 
@@ -157,6 +160,7 @@ def build_config(args: argparse.Namespace, config_data: dict) -> CalibrationConf
         sampling_interval_steps=config_data.get("sampling_interval_steps", defaults.sampling_interval_steps),
         sampling_burn_in_steps=config_data.get("sampling_burn_in_steps", defaults.sampling_burn_in_steps),
         sampling_return_mode=config_data.get("sampling_return_mode", defaults.sampling_return_mode),
+        synthetic_return_transform=config_data.get("synthetic_return_transform", defaults.synthetic_return_transform),
         n_vol_bins=args.vol_bins if args.vol_bins is not None else config_data.get("n_vol_bins", defaults.n_vol_bins),
         event_count_weight=config_data.get("event_count_weight", defaults.event_count_weight),
         empty_penalty=config_data.get("empty_penalty", defaults.empty_penalty),
@@ -166,6 +170,7 @@ def build_config(args: argparse.Namespace, config_data: dict) -> CalibrationConf
         empirical_source=config_data.get("empirical_source", defaults.empirical_source),
         threshold_sigma=config_data.get("threshold_sigma", defaults.threshold_sigma),
         return_loss_weight=config_data.get("return_loss_weight", defaults.return_loss_weight),
+        conditional_vol_quantiles=tuple(config_data.get("conditional_vol_quantiles", defaults.conditional_vol_quantiles)),
         seed=args.seed if args.seed is not None else config_data.get("seed", defaults.seed),
         bounds=bounds,
         base_params=base_params,
@@ -241,20 +246,30 @@ def plot_returns_pdf(
     *,
     market: str,
     bins: int = 240,
+    exclude_zeros: bool = False,
 ) -> None:
     empirical = finite_values(empirical_returns)
     simulated = finite_values(simulated_returns)
+    if exclude_zeros:
+        empirical = empirical[empirical != 0]
+        simulated = simulated[simulated != 0]
     if empirical.size == 0 or simulated.size == 0:
         return
 
-    edges = shared_edges(empirical, simulated, bins=bins, lower_q=0.001, upper_q=0.999)
+    if exclude_zeros:
+        bins += bins % 2
+        span = float(max(abs(np.quantile(empirical, 0.001)), abs(np.quantile(empirical, 0.999))))
+        edges = np.linspace(-span, span, bins + 1)
+        edges[bins // 2] = 0.0
+    else:
+        edges = shared_edges(empirical, simulated, bins=bins, lower_q=0.001, upper_q=0.999)
     empirical = empirical[(empirical >= edges[0]) & (empirical <= edges[-1])]
     simulated = simulated[(simulated >= edges[0]) & (simulated <= edges[-1])]
 
     fig, ax = plt.subplots(figsize=(7, 4), layout="constrained")
     ax.hist(empirical, bins=edges, density=True, histtype="step", linewidth=1.8, label=f"Empirical ({empirical_returns.shape[1]} stocks)")
     ax.hist(simulated, bins=edges, density=True, histtype="step", linewidth=1.8, label=f"Synthetic ({simulated_returns.shape[1]} paths)")
-    ax.set_title(f"{market} return PDF ({bins} bins)")
+    ax.set_title(f"{market} {'nonzero ' if exclude_zeros else ''}return PDF ({bins} bins)")
     ax.set_xlabel("Return")
     ax.set_ylabel("Density")
     ax.legend()
@@ -330,25 +345,47 @@ def plot_market_comparisons(
             column_prefix=market,
         ),
     )
+    simulated_returns = calibrator.observed_simulated_returns(simulation.returns)
     output_dir.mkdir(parents=True, exist_ok=True)
     empirical_returns = calibrator.load_empirical_returns(market)
     plot_returns_pdf(
         empirical_returns,
-        simulation.returns,
+        simulated_returns,
         output_dir / f"{market}_returns_pdf.png",
         market=market,
     )
+    if calibrator.config.loss_metric == "conditional_fht":
+        plot_returns_pdf(
+            empirical_returns, simulated_returns,
+            output_dir / f"{market}_returns_nonzero_pdf.png",
+            market=market, exclude_zeros=True,
+        )
     if calibrator.config.loss_metric == "return_moments":
-        return empirical_returns, simulation.returns
+        return empirical_returns, simulated_returns
 
     event_pairs = {}
     for pair in calibrator.config.threshold_pairs:
         empirical = calibrator.load_empirical_events(market, pair)
-        simulated = calibrator.count_simulated_events(simulation.returns, pair, market)
+        simulated = calibrator.count_simulated_events(simulated_returns, pair, market)
         event_pairs[pair] = (empirical, simulated)
         start = str(pair[0]).replace("-", "m").replace(".", "p")
         end = str(pair[1]).replace("-", "m").replace(".", "p")
-        if calibrator.config.loss_metric == "mfht_curve":
+        if calibrator.config.loss_metric == "conditional_fht":
+            conditional = calibrator.prepare_conditional_target(empirical)
+            survival = calibrator.conditional_comparison(conditional, simulated)
+            survival.to_csv(output_dir / f"{market}_{start}_{end}_conditional_fht.csv", index=False)
+            fig_survival, axes = plt.subplots(1, len(conditional.counts), figsize=(4 * len(conditional.counts), 3.5))
+            for region, axis in enumerate(np.atleast_1d(axes)):
+                subset = survival.loc[survival.region == region]
+                axis.plot(subset.fht_day, subset.empirical_survival, label="Empirical")
+                axis.plot(subset.fht_day, subset.synthetic_survival, label="Synthetic")
+                axis.set_title(f"Vol {conditional.edges[region]:.3g}–{conditional.edges[region + 1]:.3g}")
+                axis.set(xlabel="FHT (days)", ylabel="P(FHT ≥ day)", ylim=(0, 1))
+                axis.legend()
+            fig_survival.tight_layout()
+            fig_survival.savefig(output_dir / f"{market}_{start}_{end}_conditional_fht.png", dpi=180)
+            plt.close(fig_survival)
+        if calibrator.config.loss_metric in ("mfht_curve", "conditional_fht"):
             target = calibrator.prepare_curve_target(empirical)
             comparison = calibrator.curve_comparison(target, simulated)
             comparison.to_csv(output_dir / f"{market}_{start}_{end}_mfht.csv", index=False)
@@ -400,7 +437,7 @@ def plot_market_comparisons(
         tau_min=calibrator.config.tau_min,
         tau_max=calibrator.config.tau_max,
     )
-    return empirical_returns, simulation.returns
+    return empirical_returns, simulated_returns
 
 
 def main() -> None:
@@ -418,7 +455,7 @@ def main() -> None:
     parser.add_argument("--pilot-steps", type=int)
     parser.add_argument("--full-steps", type=int)
     parser.add_argument("--vol-bins", type=int)
-    parser.add_argument("--loss-metric", choices=("mfht_curve", "fht_distribution", "return_moments"),
+    parser.add_argument("--loss-metric", choices=("mfht_curve", "fht_distribution", "return_moments", "conditional_fht"),
                         help="Objective to optimize; default is the MFHT-versus-volatility curve")
     parser.add_argument("--seed", type=int)
     parser.add_argument("--std-normalization", action="store_true", default=None, help="Scale simulated FHT thresholds by the simulated return standard deviation")
@@ -487,6 +524,8 @@ def main() -> None:
     print(f"  threshold_sigma: {config.threshold_sigma if config.threshold_sigma is not None else 'automatic'}")
     print(f"  return_loss_weight: {config.return_loss_weight}")
     print(f"  loss_metric: {config.loss_metric}")
+    print(f"  synthetic_return_transform: {config.synthetic_return_transform}")
+    print(f"  count_method: {config.count_method}")
     print(f"  noise: {'correlated' if config.correlated_noise else 'uncorrelated'}")
     print(f"  optimized_parameters: {', '.join(calibrator.parameter_names())}")
     if config.empirical_source == "database":
@@ -564,6 +603,7 @@ def main() -> None:
                             column_prefix=market,
                         ),
                     ).returns
+                    first_plot = first_calibrator.observed_simulated_returns(first_plot)
                     first_figure_dir = run_options.figure_dir / market
                     first_figure_dir.mkdir(parents=True, exist_ok=True)
                     plot_returns_pdf(
@@ -671,6 +711,8 @@ def main() -> None:
                 "sampling_interval_steps": market_config.sampling_interval_steps,
                 "sampling_burn_in_steps": market_config.sampling_burn_in_steps,
                 "sampling_return_mode": market_config.sampling_return_mode,
+                "synthetic_return_transform": market_config.synthetic_return_transform,
+                "count_method": market_config.count_method,
                 "correlated_noise": config.correlated_noise,
                 "optimized_parameters": ",".join(calibrator.parameter_names()),
                 "config_json": str(args.config_json) if args.config_json else None,
@@ -695,6 +737,15 @@ def main() -> None:
                 **moment_record,
             }
         )
+        if config.loss_metric == "conditional_fht":
+            return_distribution = calibrator.empirical_return_distribution_target(market)
+            result_record["plot_conditional_fht_loss"] = calibrator.grid_loss(
+                calibrator.load_empirical_grid(market), synthetic_returns, market)
+            result_record["plot_nonzero_return_loss"] = calibrator.return_distribution_loss(
+                synthetic_returns, return_distribution)
+            result_record["empirical_exact_zero_fraction"] = return_distribution.exact_zero_fraction
+            result_record["synthetic_exact_zero_fraction"] = float(
+                np.mean(synthetic_returns.to_numpy(dtype=float) == 0))
         if run_options.staged:
             result_record["plot_return_loss"] = calibrator.return_moment_loss(synthetic_returns, target)
             result_record["plot_mfht_loss"] = calibrator.grid_loss(

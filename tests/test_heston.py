@@ -19,6 +19,7 @@ from scripts import calibrate_heston
 from scripts.calibrate_heston import build_config, plot_market_comparisons
 from stabilvol.heston import CalibrationConfig, HestonCalibrator, HestonParams, SimulationConfig, simulate_modified_heston
 from stabilvol.heston.calibration import _heston_worker_objective, moments_frame, table_name_for_thresholds
+from stabilvol.heston.paper_reproduction import count_fortran_hitting_events
 from stabilvol.utility.classes.stability_analysis import StabilVolter
 
 
@@ -92,6 +93,24 @@ class HestonSimulationTests(unittest.TestCase):
 
 
 class HestonCountingTests(unittest.TestCase):
+    def test_fortran_counter_includes_crossing_return_and_breaks_on_missing_day(self):
+        values = np.array([[0.0], [-0.1], [0.2], [-2.0]])
+        events = count_fortran_hitting_events(values, 1.0, tau_max=30)
+        self.assertEqual(int(events.iloc[0].FHT), 3)
+        self.assertEqual(int(events.iloc[0].volatility_observations), 3)
+        self.assertGreater(float(events.iloc[0].Volatility), 0.9)
+        values[2, 0] = np.nan
+        self.assertTrue(count_fortran_hitting_events(
+            values, 1.0, tau_max=30, missing_policy="break").empty)
+
+    def test_clean_fortran_counter_resets_after_discarded_crossing(self):
+        values = np.array([[0.0], [0.0], [0.0], [0.0], [-2.0],
+                           [0.0], [0.0], [0.0], [-2.0]])
+        faithful = count_fortran_hitting_events(values, 1.0, tau_max=3)
+        clean = count_fortran_hitting_events(values, 1.0, tau_max=3, reset_on_discard=True)
+        self.assertTrue(faithful.empty)
+        self.assertEqual(clean.FHT.tolist(), [3])
+
     def test_simulated_returns_work_with_stabilvolter(self):
         result = simulate_modified_heston(
             HestonParams(),
@@ -142,6 +161,44 @@ class HestonCountingTests(unittest.TestCase):
 
 
 class HestonCalibrationTests(unittest.TestCase):
+    def test_simple_return_transform_preserves_index_and_values(self):
+        frame = pd.DataFrame({"a": [0.0, np.log(1.1)]},
+                             index=pd.date_range("2000-01-01", periods=2))
+        calibrator = HestonCalibrator(CalibrationConfig(synthetic_return_transform="simple"))
+        transformed = calibrator.observed_simulated_returns(frame)
+        pd.testing.assert_index_equal(transformed.index, frame.index)
+        np.testing.assert_allclose(transformed.a, [0.0, 0.1])
+
+    def test_conditional_fht_objective_distinguishes_conditional_durations(self):
+        config = CalibrationConfig(
+            root=".", loss_metric="conditional_fht", tau_min=2, tau_max=10,
+            conditional_vol_quantiles=(0.0, 0.5, 1.0),
+            min_empirical_bin_events=1, min_simulated_bin_events=1,
+            event_count_weight=0.0,
+        )
+        calibrator = HestonCalibrator(config)
+        empirical = pd.DataFrame({"Volatility": [0.1, 0.2, 0.3, 0.4], "FHT": [2, 2, 8, 8]})
+        reversed_durations = pd.DataFrame({"Volatility": [0.1, 0.2, 0.3, 0.4], "FHT": [8, 8, 2, 2]})
+        target = calibrator.prepare_conditional_target(empirical)
+        self.assertAlmostEqual(calibrator.conditional_loss(target, empirical), 0.0)
+        self.assertGreater(calibrator.conditional_loss(target, reversed_durations), 0.0)
+        self.assertGreater(calibrator.conditional_loss(target, empirical.iloc[:2]), 0.0)
+
+    def test_nonzero_return_distribution_excludes_exact_zeros(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "data" / "interim").mkdir(parents=True)
+            returns = pd.DataFrame({"a": [0.0, -0.1, 0.1, 0.2]},
+                                   index=pd.date_range("2000-01-01", periods=4))
+            returns.to_pickle(root / "data" / "interim" / "UN.pickle")
+            calibrator = HestonCalibrator(CalibrationConfig(root=root))
+            target = calibrator.empirical_return_distribution_target("UN")
+            self.assertAlmostEqual(target.exact_zero_fraction, 0.25)
+            self.assertAlmostEqual(calibrator.return_distribution_loss(returns, target), 0.0)
+            self.assertAlmostEqual(calibrator.return_distribution_loss(
+                pd.DataFrame({"a": [-0.1, 0.1, 0.2]}), target), 0.0)
+            self.assertGreater(calibrator.return_distribution_loss(returns * 2, target), 0.0)
+
     def test_return_objective_uses_configured_sampling_interval(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

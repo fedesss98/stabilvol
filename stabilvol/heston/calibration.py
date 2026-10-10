@@ -18,6 +18,7 @@ from scipy.stats import ks_2samp
 
 from stabilvol.utility.classes.stability_analysis import StabilVolter
 
+from .paper_reproduction import count_fortran_hitting_events
 from .simulation import HestonParams, SimulationConfig, SimulationError, simulate_modified_heston
 
 
@@ -57,6 +58,7 @@ class CalibrationConfig:
     sampling_interval_steps: int = 1
     sampling_burn_in_steps: int = 0
     sampling_return_mode: str = "pre_reset_step"
+    synthetic_return_transform: str = "log"
     n_vol_bins: int = 40
     event_count_weight: float = 0.1
     empty_penalty: float = 10.0
@@ -66,6 +68,7 @@ class CalibrationConfig:
     empirical_source: str = "database"
     threshold_sigma: Optional[float] = None
     return_loss_weight: float = 0.0
+    conditional_vol_quantiles: tuple[float, ...] = (0.0, 0.5, 0.85, 0.97, 0.995)
     seed: int = 12345
     bounds: dict[str, tuple[float, float]] = field(default_factory=lambda: dict(DEFAULT_BOUNDS))
     base_params: HestonParams = field(default_factory=HestonParams)
@@ -80,8 +83,16 @@ class CalibrationConfig:
         object.__setattr__(self, "markets", tuple(self.markets))
         object.__setattr__(self, "threshold_pairs", tuple(tuple(pair) for pair in self.threshold_pairs))
         object.__setattr__(self, "bounds", {key: tuple(value) for key, value in self.bounds.items()})
-        if self.loss_metric not in ("mfht_curve", "fht_distribution", "return_moments"):
-            raise ValueError("loss_metric must be mfht_curve, fht_distribution, or return_moments")
+        object.__setattr__(self, "conditional_vol_quantiles", tuple(self.conditional_vol_quantiles))
+        if self.loss_metric not in ("mfht_curve", "fht_distribution", "return_moments", "conditional_fht"):
+            raise ValueError("invalid loss_metric")
+        quantiles = self.conditional_vol_quantiles
+        if len(quantiles) < 3 or quantiles[0] != 0 or quantiles[-1] > 1 or any(
+            not 0 <= left < right <= 1 for left, right in zip(quantiles, quantiles[1:])
+        ):
+            raise ValueError("conditional_vol_quantiles must increase from zero to at most one")
+        if self.count_method in ("fortran", "fortran_clean") and self.threshold_sigma is None:
+            raise ValueError("Fortran event counting requires a fixed threshold_sigma")
         if self.empirical_source not in ("database", "returns"):
             raise ValueError("empirical_source must be database or returns")
         if self.threshold_sigma is not None and self.threshold_sigma <= 0:
@@ -96,6 +107,8 @@ class CalibrationConfig:
             raise ValueError("sampling interval must be positive and burn-in nonnegative")
         if self.sampling_return_mode not in ("pre_reset_step", "sampled_x"):
             raise ValueError("sampling_return_mode must be pre_reset_step or sampled_x")
+        if self.synthetic_return_transform not in ("log", "simple"):
+            raise ValueError("synthetic_return_transform must be log or simple")
         if self.sampling_interval_steps > 1 and self.sampling_return_mode != "sampled_x":
             raise ValueError("sampling intervals above one require sampled_x returns")
         if self.event_count_weight < 0 or self.empty_penalty <= 0:
@@ -139,11 +152,12 @@ class CalibrationResult:
 class ObjectivePayload:
     config: CalibrationConfig
     market: str
-    empirical_grid: dict[tuple[float, float], pd.DataFrame | CurveTarget]
+    empirical_grid: dict[tuple[float, float], pd.DataFrame | CurveTarget | ConditionalFHTTarget]
     n_paths: int
     n_steps: int
     seed: int
     return_target: Optional[ReturnTarget] = None
+    return_distribution_target: Optional[ReturnDistributionTarget] = None
 
 
 @dataclass(frozen=True)
@@ -155,6 +169,27 @@ class CurveTarget:
     mfht: np.ndarray
     eligible: np.ndarray
     fht_scale: float
+
+
+@dataclass(frozen=True)
+class ConditionalFHTTarget:
+    """Empirical FHT survival curves in fixed local-volatility regions."""
+
+    edges: np.ndarray
+    counts: np.ndarray
+    survival: np.ndarray
+    eligible: np.ndarray
+    total_events: int
+
+
+@dataclass(frozen=True)
+class ReturnDistributionTarget:
+    """Quantiles of the empirical nonzero daily-return distribution."""
+
+    probabilities: np.ndarray
+    quantiles: np.ndarray
+    scale: float
+    exact_zero_fraction: float
 
 
 @dataclass(frozen=True)
@@ -202,6 +237,7 @@ def heston_objective(vector: np.ndarray, payload: ObjectivePayload) -> float:
         n_steps=payload.n_steps,
         seed=payload.seed,
         return_target=payload.return_target,
+        return_distribution_target=payload.return_distribution_target,
     )
 
 
@@ -226,6 +262,15 @@ class HestonCalibrator:
         self.config = config
         self._empirical_cache: dict[tuple[str, tuple[float, float]], pd.DataFrame] = {}
         self._returns_cache: dict[str, pd.DataFrame] = {}
+
+    def observed_simulated_returns(self, log_returns: pd.DataFrame) -> pd.DataFrame:
+        if self.config.synthetic_return_transform == "log":
+            return log_returns
+        with np.errstate(over="raise", invalid="raise"):
+            values = np.expm1(log_returns.to_numpy(dtype=float, copy=False))
+        if not np.isfinite(values).all():
+            raise SimulationError("transformed synthetic returns are non-finite")
+        return pd.DataFrame(values, index=log_returns.index, columns=log_returns.columns)
 
     def market_shape(self, market: str) -> tuple[int, int]:
         return self.load_empirical_returns(market).shape
@@ -270,7 +315,35 @@ class HestonCalibrator:
         # The mean is small in daily units; express its error in tenths of
         # the empirical daily standard deviation. Compare widths by ratio.
         return float(((model_mean - target.mean) / (0.1 * target.std)) ** 2
-                     + np.log(model_std / target.std) ** 2)
+                      + np.log(model_std / target.std) ** 2)
+
+    def empirical_return_distribution_target(self, market: str) -> ReturnDistributionTarget:
+        values = self.load_empirical_returns(market).to_numpy(dtype=float, copy=False)
+        finite = values[np.isfinite(values)]
+        nonzero = finite[finite != 0]
+        if nonzero.size < 2:
+            raise ValueError(f"no empirical nonzero returns for {market}")
+        probabilities = np.r_[0.001, 0.005, np.linspace(0.01, 0.99, 99), 0.995, 0.999]
+        central = np.quantile(nonzero, [0.16, 0.84])
+        scale = float((central[1] - central[0]) / 2)
+        if scale <= 0:
+            raise ValueError(f"zero empirical nonzero-return scale for {market}")
+        return ReturnDistributionTarget(
+            probabilities=probabilities,
+            quantiles=np.quantile(nonzero, probabilities),
+            scale=scale,
+            exact_zero_fraction=float(np.mean(finite == 0)),
+        )
+
+    @staticmethod
+    def return_distribution_loss(returns: pd.DataFrame, target: ReturnDistributionTarget) -> float:
+        values = returns.to_numpy(dtype=float, copy=False).ravel()
+        nonzero = values[np.isfinite(values) & (values != 0)]
+        if nonzero.size < 2:
+            return float("inf")
+        # Compare conditional nonzero distributions; zero mass requires an
+        # observation model and is reported separately.
+        return float(np.mean(np.abs(np.quantile(nonzero, target.probabilities) - target.quantiles)) / target.scale)
 
     def load_empirical_events(self, market: str, threshold_pair: tuple[float, float]) -> pd.DataFrame:
         cache_key = (market, threshold_pair)
@@ -338,6 +411,18 @@ class HestonCalibrator:
         market: str,
     ) -> pd.DataFrame:
         fixed_sigma = self.config.threshold_sigma
+        if self.config.count_method in ("fortran", "fortran_clean"):
+            direction = "crash" if threshold_pair[1] < threshold_pair[0] else "rally"
+            start, end = threshold_pair if direction == "crash" else (-threshold_pair[0], -threshold_pair[1])
+            events = count_fortran_hitting_events(
+                returns.to_numpy(dtype=float, copy=False), fixed_sigma,
+                direction=direction, start_sigma=start, end_sigma=end,
+                tau_min=self.config.tau_min, tau_max=self.config.tau_max,
+                missing_policy="break",
+                reset_on_discard=self.config.count_method == "fortran_clean",
+            )
+            events["Market"] = market
+            return events
         analyst = StabilVolter(
             start_level=threshold_pair[0] * fixed_sigma if fixed_sigma is not None else threshold_pair[0],
             end_level=threshold_pair[1] * fixed_sigma if fixed_sigma is not None else threshold_pair[1],
@@ -475,13 +560,81 @@ class HestonCalibrator:
         event_distribution_loss = 0.5 * float(np.abs(empirical_weights - model_weights).sum())
         return shape_loss + self.config.event_count_weight * event_distribution_loss
 
-    def grid_loss(self, empirical_grid: dict[tuple[float, float], pd.DataFrame | CurveTarget], simulated_returns: pd.DataFrame, market: str) -> float:
+    def _conditional_summary(self, volatility: np.ndarray, fht: np.ndarray,
+                             edges: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        counts = np.histogram(volatility, bins=edges)[0]
+        survival = np.full((len(counts), self.config.tau_max - self.config.tau_min), np.nan)
+        fht_edges = np.arange(self.config.tau_min - 0.5, self.config.tau_max + 1.5)
+        for index in range(len(counts)):
+            in_bin = (volatility >= edges[index]) & (
+                (volatility <= edges[index + 1]) if index == len(counts) - 1
+                else (volatility < edges[index + 1])
+            )
+            if counts[index]:
+                frequencies = np.histogram(fht[in_bin], bins=fht_edges)[0]
+                survival[index] = np.cumsum(frequencies[::-1])[::-1][1:] / counts[index]
+        return counts, survival
+
+    def prepare_conditional_target(self, empirical: pd.DataFrame) -> ConditionalFHTTarget:
+        volatility, fht = self._event_arrays(empirical)
+        if volatility.size == 0:
+            raise ValueError("no finite empirical FHT events for conditional objective")
+        edges = np.quantile(volatility, self.config.conditional_vol_quantiles)
+        edges[0] = 0.0
+        if np.any(np.diff(edges) <= 0):
+            raise ValueError("conditional volatility regions collapse; adjust quantiles")
+        counts, survival = self._conditional_summary(volatility, fht, edges)
+        eligible = counts >= self.config.min_empirical_bin_events
+        if not np.any(eligible):
+            raise ValueError("no empirical conditional FHT regions meet the minimum event count")
+        return ConditionalFHTTarget(edges, counts, survival, eligible, len(volatility))
+
+    def conditional_comparison(self, target: ConditionalFHTTarget, simulated: pd.DataFrame) -> pd.DataFrame:
+        volatility, fht = self._event_arrays(simulated)
+        counts, survival = self._conditional_summary(volatility, fht, target.edges)
+        rows = []
+        for region in range(len(target.counts)):
+            for offset, day in enumerate(range(self.config.tau_min + 1, self.config.tau_max + 1)):
+                rows.append({
+                    "region": region, "volatility_lower": target.edges[region],
+                    "volatility_upper": target.edges[region + 1], "fht_day": day,
+                    "empirical_events": target.counts[region], "synthetic_events": counts[region],
+                    "empirical_survival": target.survival[region, offset],
+                    "synthetic_survival": survival[region, offset],
+                    "fit_region": target.eligible[region],
+                })
+        return pd.DataFrame(rows)
+
+    def conditional_loss(self, target: ConditionalFHTTarget, simulated: pd.DataFrame) -> float:
+        if simulated.empty:
+            return self.config.empty_penalty
+        volatility, fht = self._event_arrays(simulated)
+        if volatility.size == 0:
+            return self.config.empty_penalty
+        counts, survival = self._conditional_summary(volatility, fht, target.edges)
+        eligible = target.eligible
+        covered = eligible & (counts >= self.config.min_simulated_bin_events)
+        region_errors = np.ones(int(eligible.sum()), dtype=float)
+        region_errors[covered[eligible]] = np.mean(
+            np.abs(survival[covered] - target.survival[covered]), axis=1
+        )
+        empirical_counts = np.r_[target.counts, target.total_events - target.counts.sum()]
+        simulated_counts = np.r_[counts, len(volatility) - counts.sum()]
+        occupancy = 0.5 * np.abs(
+            empirical_counts / target.total_events - simulated_counts / len(volatility)
+        ).sum()
+        return float(region_errors.mean() + self.config.event_count_weight * occupancy)
+
+    def grid_loss(self, empirical_grid: dict[tuple[float, float], pd.DataFrame | CurveTarget | ConditionalFHTTarget], simulated_returns: pd.DataFrame, market: str) -> float:
         losses = []
         for pair, empirical in empirical_grid.items():
             simulated = self.count_simulated_events(simulated_returns, pair, market)
             if self.config.loss_metric == "mfht_curve":
                 target = empirical if isinstance(empirical, CurveTarget) else self.prepare_curve_target(empirical)
                 losses.append(self.curve_loss(target, simulated))
+            elif self.config.loss_metric == "conditional_fht":
+                target = empirical if isinstance(empirical, ConditionalFHTTarget) else self.prepare_conditional_target(empirical)
+                losses.append(self.conditional_loss(target, simulated))
             else:
                 if not isinstance(empirical, pd.DataFrame):
                     raise TypeError("fht_distribution loss requires empirical events")
@@ -506,11 +659,12 @@ class HestonCalibrator:
         vector: np.ndarray,
         *,
         market: str,
-        empirical_grid: dict[tuple[float, float], pd.DataFrame | CurveTarget],
+        empirical_grid: dict[tuple[float, float], pd.DataFrame | CurveTarget | ConditionalFHTTarget],
         n_paths: int,
         n_steps: int,
         seed: int,
         return_target: Optional[ReturnTarget] = None,
+        return_distribution_target: Optional[ReturnDistributionTarget] = None,
     ) -> float:
         try:
             params = self.params_from_vector(vector)
@@ -526,15 +680,22 @@ class HestonCalibrator:
                 column_prefix=market,
             )
             result = simulate_modified_heston(params, sim_config)
+            observed_returns = self.observed_simulated_returns(result.returns)
             if self.config.loss_metric == "return_moments":
                 if return_target is None:
                     raise ValueError("return target required for return_moments")
-                return self.return_moment_loss(result.returns, return_target)
-            loss = self.grid_loss(empirical_grid, result.returns, market)
+                return self.return_moment_loss(observed_returns, return_target)
+            loss = self.grid_loss(empirical_grid, observed_returns, market)
             if self.config.return_loss_weight:
-                if return_target is None:
-                    raise ValueError("return target required for return loss")
-                loss += self.config.return_loss_weight * self.return_moment_loss(result.returns, return_target)
+                if self.config.loss_metric == "conditional_fht":
+                    if return_distribution_target is None:
+                        raise ValueError("nonzero return distribution target required")
+                    loss += self.config.return_loss_weight * self.return_distribution_loss(
+                        observed_returns, return_distribution_target)
+                else:
+                    if return_target is None:
+                        raise ValueError("return target required for return loss")
+                    loss += self.config.return_loss_weight * self.return_moment_loss(observed_returns, return_target)
             return loss
         except (FloatingPointError, OverflowError, SimulationError, ValueError):
             return float("inf")
@@ -552,14 +713,17 @@ class HestonCalibrator:
         progress: bool = True,
     ) -> CalibrationResult:
         empirical_grid = {} if self.config.loss_metric == "return_moments" else self.load_empirical_grid(market)
-        objective_grid = (
-            {pair: self.prepare_curve_target(events) for pair, events in empirical_grid.items()}
-            if self.config.loss_metric == "mfht_curve" else empirical_grid
-        )
+        objective_grid = self._prepare_objective_grid(empirical_grid)
         _, n_market_stocks = self.market_shape(market)
         return_target = (
             self.empirical_return_target(market)
-            if self.config.loss_metric == "return_moments" or self.config.return_loss_weight else None
+            if self.config.loss_metric == "return_moments" or (
+                self.config.return_loss_weight and self.config.loss_metric != "conditional_fht"
+            ) else None
+        )
+        return_distribution_target = (
+            self.empirical_return_distribution_target(market)
+            if self.config.loss_metric == "conditional_fht" and self.config.return_loss_weight else None
         )
         n_paths_pilot = min(self.config.pilot_max_paths, n_market_stocks)
         seed = self.config.seed + sum((index + 1) * ord(char) for index, char in enumerate(market))
@@ -571,6 +735,7 @@ class HestonCalibrator:
             n_steps=self.config.pilot_n_steps,
             seed=seed,
             return_target=return_target,
+            return_distribution_target=return_distribution_target,
         )
         objective = partial(heston_objective, payload=payload)
         generation_start = time.perf_counter()
@@ -644,12 +809,17 @@ class HestonCalibrator:
                         column_prefix=market,
                     ),
                 )
+                validation_returns = self.observed_simulated_returns(validation_sim.returns)
                 if self.config.loss_metric == "return_moments":
-                    validation_loss = self.return_moment_loss(validation_sim.returns, return_target)
+                    validation_loss = self.return_moment_loss(validation_returns, return_target)
                 else:
-                    validation_loss = self.grid_loss(objective_grid, validation_sim.returns, market)
-                    validation_loss += self.config.return_loss_weight * self.return_moment_loss(
-                        validation_sim.returns, return_target)
+                    validation_loss = self.grid_loss(objective_grid, validation_returns, market)
+                    if self.config.return_loss_weight:
+                        validation_loss += self.config.return_loss_weight * (
+                            self.return_distribution_loss(validation_returns, return_distribution_target)
+                            if self.config.loss_metric == "conditional_fht" else
+                            self.return_moment_loss(validation_returns, return_target)
+                        )
             except (SimulationError, ValueError, FloatingPointError, OverflowError):
                 validation_loss = float("inf")
 
@@ -676,10 +846,7 @@ class HestonCalibrator:
         seed: Optional[int] = None,
     ) -> tuple[float, pd.DataFrame]:
         empirical_grid = {} if self.config.loss_metric == "return_moments" else self.load_empirical_grid(market)
-        objective_grid = (
-            {pair: self.prepare_curve_target(events) for pair, events in empirical_grid.items()}
-            if self.config.loss_metric == "mfht_curve" else empirical_grid
-        )
+        objective_grid = self._prepare_objective_grid(empirical_grid)
         _, n_market_stocks = self.market_shape(market)
         n_paths = n_market_stocks if n_paths is None else n_paths
         n_steps = self.config.full_n_steps if n_steps is None else n_steps
@@ -698,14 +865,27 @@ class HestonCalibrator:
                 column_prefix=market,
             ),
         )
+        observed_returns = self.observed_simulated_returns(simulation.returns)
         if self.config.loss_metric == "return_moments":
-            loss = self.return_moment_loss(simulation.returns, self.empirical_return_target(market))
+            loss = self.return_moment_loss(observed_returns, self.empirical_return_target(market))
         else:
-            loss = self.grid_loss(objective_grid, simulation.returns, market)
+            loss = self.grid_loss(objective_grid, observed_returns, market)
             if self.config.return_loss_weight:
-                loss += self.config.return_loss_weight * self.return_moment_loss(
-                    simulation.returns, self.empirical_return_target(market))
-        return loss, simulation.returns
+                loss += self.config.return_loss_weight * (
+                    self.return_distribution_loss(
+                        observed_returns, self.empirical_return_distribution_target(market))
+                    if self.config.loss_metric == "conditional_fht" else
+                    self.return_moment_loss(observed_returns, self.empirical_return_target(market))
+                )
+        return loss, observed_returns
+
+    def _prepare_objective_grid(self, empirical_grid: dict[tuple[float, float], pd.DataFrame]
+                                ) -> dict[tuple[float, float], pd.DataFrame | CurveTarget | ConditionalFHTTarget]:
+        if self.config.loss_metric == "mfht_curve":
+            return {pair: self.prepare_curve_target(events) for pair, events in empirical_grid.items()}
+        if self.config.loss_metric == "conditional_fht":
+            return {pair: self.prepare_conditional_target(events) for pair, events in empirical_grid.items()}
+        return empirical_grid
 
     def result_frame(self, results: Iterable[CalibrationResult]) -> pd.DataFrame:
         return pd.DataFrame([result.to_record() for result in results])

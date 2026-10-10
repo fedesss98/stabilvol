@@ -29,6 +29,8 @@ def count_fortran_hitting_events(
     anomaly_limit: float = 100.0,
     tau_min: int = 2,
     tau_max: int = 300,
+    missing_policy: str = "error",
+    reset_on_discard: bool = False,
 ) -> pd.DataFrame:
     """Port the state transitions and local volatility of ``old_code/calmG.f``.
 
@@ -36,9 +38,17 @@ def count_fortran_hitting_events(
     The original leaves sums/counters intact after an ineligible crossing; that
     behavior is preserved. Rally counting uses sign-reversed returns because the
     supplied Fortran program and parameter file implement crashes only.
+    With ``missing_policy='break'``, a missing observation ends the current
+    episode and prevents a new episode on that date. The Fortran input was dense.
+    ``reset_on_discard=True`` repairs the original carry-over behavior after
+    an ineligible crossing while retaining its event-volatility window.
     """
     values = np.asarray(returns, dtype=float)
-    if values.ndim != 2 or values.shape[1] < 1 or not np.isfinite(values).all():
+    if missing_policy not in ("error", "break"):
+        raise ValueError("missing_policy must be 'error' or 'break'")
+    if values.ndim != 2 or values.shape[1] < 1 or np.isinf(values).any():
+        raise ValueError("returns must be a two-dimensional array without infinities")
+    if missing_policy == "error" and not np.isfinite(values).all():
         raise ValueError("returns must be a finite two-dimensional array")
     if direction not in ("crash", "rally"):
         raise ValueError("direction must be 'crash' or 'rally'")
@@ -59,6 +69,14 @@ def count_fortran_hitting_events(
 
     for step in range(values.shape[0]):
         raw = values[step]
+        if missing_policy == "break":
+            missing = np.isnan(raw)
+            active[missing] = False
+            calm[missing] = 0
+            counts[missing] = 0
+            sums[missing] = 0.0
+            squares[missing] = 0.0
+            raw = np.where(missing, 0.0, raw)
         # In calmG.f the sums are updated before anomaly clipping and before
         # testing the terminal crossing.
         sums[active] += raw[active]
@@ -66,6 +84,8 @@ def count_fortran_hitting_events(
         counts[active] += 1
         row = sign * np.where(np.abs(raw) > anomaly_limit, 0.0, raw)
         begin = ~active & (row > start_sigma * sigma_bar) & (row < start_upper_sigma * sigma_bar)
+        if missing_policy == "break":
+            begin &= ~missing
         starts[begin] = step
         active |= begin
         finish = active & (row <= end_sigma * sigma_bar)
@@ -82,10 +102,11 @@ def count_fortran_hitting_events(
                 "end_step": np.full(paths.size, step, dtype=np.int32),
                 "volatility_observations": counts[paths].copy(),
             }))
-            counts[valid] = 0
-            sums[valid] = 0.0
-            squares[valid] = 0.0
-            calm[valid] = 0
+        reset = finish if reset_on_discard else valid
+        counts[reset] = 0
+        sums[reset] = 0.0
+        squares[reset] = 0.0
+        calm[reset] = 0
         active[finish] = False
         calm[active] += 1
 

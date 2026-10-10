@@ -99,6 +99,20 @@ Results go to `data/processed/heston_paper/`: figure PNGs, binned MFHT CSVs, eve
 
 **Volatility-axis issue in the original Fortran:** `parmG.dat` gives `delta = sigma_max/num_bin = 0.2/5000 = 0.00004`; `calmG.f` assigns events to bin `i` using this width but writes `i*delta/2` as the x coordinate. Thus the published-style MFHT axis is approximately half the physical event volatility. The default script saves both `fig2a_fig3a_theoretical_mfht.png` on the original reported axis and `mfht_corrected_volatility_axis.png` on a physical axis. Each MFHT CSV contains the reported coordinate and the true lower/upper bin limits. `--method clean` uses the earlier repository counter and a physically labeled axis; `--bins` and `--include-end-in-volatility` apply only to that method.
 
+For an explicit, editable reference to the supplied Fortran settings, run:
+
+```powershell
+.venv/Scripts/python.exe scripts/reproduce_heston_fortran_reference.py
+```
+
+The settings are in [`configs/heston_fortran_reference.json`](configs/heston_fortran_reference.json). This separate run uses 1071 paths, 3030 stored increments, one Euler step per increment, no burn-in, the original parameters, a zero first return per path, and `tau_min=2`, `tau_max=300`. It writes crash events, binned MFHT, a two-axis plot, and a summary to `data/processed/heston_fortran_reference/`. For a quick check, add `--paths 16 --steps 200 --output-dir data/processed/heston_fortran_smoke`.
+
+`rit_anom=100` (`counter.anomaly_limit`) is an **absolute raw-return** limit: `calmG.f` substitutes zero only when testing start/end thresholds and when computing the pooled normalization scale; the raw return still enters an active event's local-volatility sums. `sstart2=100` (`counter.start_upper_sigma`) is a distinct upper start bound of `100 × sigma_bar`. The model's `x=-6` reset threshold is distinct from both. The original counter accepts FHTs through 300 steps and retains duration and local-volatility accumulators after a rejected crossing (`reset_on_discard=false`). Its histogram bins cover physical local volatility only through 0.04, although the config says `sigma_max=0.2`, because `max_bin=1000` and `num_bin=5000`.
+
+The repository's older Python `StabilVolter.divergence_level` is a different rule: it cancels an active event when `abs(return)` exceeds its limit, and it can scale the limit by the mean empirical standard deviation. Its missing-value handling also drops missing rows and joins the surrounding observations. The Fortran reference uses dense simulated paths and substitutes zero for anomaly checks; it does not cancel the active event or remove its raw value from local volatility.
+
+The earlier conditional calibration trial uses a fixed empirical normalization scale, sampled intervals, a burn-in, a 30-step default cutoff, and `fortran_clean` by default. Its objective also includes conditional survival curves and nonzero returns. Those choices make it a different experiment; changing only `tau_max` to 300 does not reproduce the supplied Fortran. The reference script reproduces the numerical conventions for the **synthetic crash** analysis, with NumPy random draws in place of the Fortran RNG, so paths are not identical.
+
 For Slurm on the configured cluster, run `uv sync` from `/data/qmla/famato/stabilvol` before submitting:
 
 ```bash
@@ -292,6 +306,83 @@ The exporter verifies reproduced plot return moments against the saved result.
 Open the pickles with `pandas.read_pickle`; the calibration's original
 empirical returns remain in `data/interim/UN.pickle`. The analysis notebook can
 redraw the return PDFs with a different bin count after the pickles are copied.
+
+### Conditional FHT and nonzero-return calibration trial
+
+The selected sampling fits can be refit with `loss_metric=conditional_fht`.
+The experimental objective fixes four volatility regions at the empirical
+0, 50, 85, 97, and 99.5 percentiles. Within each region it compares the
+empirical and simulated conditional FHT survival curves from `tau_min + 1`
+through `tau_max`, giving each eligible region equal weight. A small
+event-occupancy penalty remains. The return term compares empirical and
+simulated **nonzero** return quantiles (0.1% through 99.9%), normalized by
+the empirical 16–84% half-width. Exact-zero frequency is reported in the
+result CSV, but is not optimized because the continuous simulator has no
+zero-return observation mechanism. By default the trial converts simulated
+log increments to simple returns with `expm1` before both the return and FHT
+comparisons, matching the empirical return unit. `--return-transform log`
+retains the earlier simulation convention.
+
+The trial script reads `final_selection.json`, each selected interval's saved
+config and fitted parameters, then writes new configs and results to separate
+`conditional_trial` directories. On Windows, use the existing `.venv` Python;
+on the cluster, replace `.venv/Scripts/python.exe` with `uv run python`.
+
+```powershell
+.venv/Scripts/python.exe scripts/calibrate_heston_conditional_trial.py --markets LN --plot-full
+.venv/Scripts/python.exe scripts/calibrate_heston_conditional_trial.py --plot-full
+```
+
+The first command isolates the largest MFHT-tail gap. To generate all four
+configs without fitting, add `--prepare-only`. `--counter fortran_clean` (the
+default) uses the supplied `calmG.f` event-window and population-volatility
+convention, while resetting accumulators after an out-of-range crossing.
+Missing empirical observations break an episode. `--counter fortran` preserves
+the original carry-over behavior after discarded crossings; combine it with
+`--tau-max 300 --return-transform log` to study the original rules. At a
+30-day cutoff, carry-over can
+greatly reduce event counts. `--counter quiet_pandas` uses the previous event
+counter, which compresses missing dates. The default `--tau-max 30` compares
+with prior calibrations; `--tau-max 300` tests the original Fortran limit. The
+script accepts `--return-weight`, `--maxiter`, `--popsize`, `--workers`, `--seed`,
+`--pilot-paths`, and `--pilot-steps` for controlled sensitivity runs. Optimization
+still uses the pilot sample; `--plot-full` produces diagnostic curves from an
+independent full-size simulation, and full validation is enabled by default. Each
+result includes `*_conditional_fht.csv` and `.png` with survival curves, as
+well as MFHT and zero-excluded return-PDF diagnostics. Test on independent seeds or
+held-out dates before selecting a specification.
+
+On the workstation, run `uv run python scripts/calibrate_heston_conditional_trial.py
+--plot-full`. Copy both `data/processed/heston_calibration/conditional_trial/`
+and `visualization/heston_calibration/conditional_trial/` to the same relative
+paths on the local machine. The final section of
+`notebooks/25-heston-sampling-calibration.ipynb` reads these folders and shows
+the fit scores, volatility-region event coverage, conditional survival curves,
+MFHT diagnostics, and nonzero-return PDFs. The trial output is a single
+independent plotting realization, not a replicate uncertainty band. Its
+conditional-FHT losses cannot be compared numerically with the older MFHT-sweep
+losses because the objective and event counter differ.
+
+The original `old_code/calmG.f` differs materially from the previous
+`StabilVolter` calibration counter: its local volatility uses returns **after
+the start and including the crossing**, with population variance (`ddof=0`).
+`StabilVolter` uses the start through the day before crossing with sample
+variance (`ddof=1`). The crossing return can be large, so this changes an
+event's volatility bin, especially in the right tail. Other differences are
+the carry-over after out-of-range crossings and the original 300-day FHT
+cutoff versus the earlier 30-day calibration cutoff,
+the original mean of per-stock population standard deviations for the common
+threshold scale versus the trial's fixed clipped pooled empirical scale, and
+the original first saved return being set to zero. `heston.f` uses uncorrelated
+price and variance shocks in its active lines, redraws negative variance
+proposals, and resets log-price below `-6`, as does the Python generator.
+The original model records one Euler increment per day; the selected `N dt`
+series and 1000-step burn-in are deliberate later experiments. `sampled_x`
+uses differences of post-reset sampled states, so a rare reset can also enter
+an aggregated return; the original writes the pre-reset Euler increment.
+`calmG.f` bins with width `0.2/5000` but prints `i*delta/2` as the volatility
+coordinate, about half the physical volatility. The trial uses physical
+event volatility rather than that printed coordinate.
 
 ### Four-market sampling fits and final ensembles
 
