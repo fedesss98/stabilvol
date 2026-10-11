@@ -19,7 +19,7 @@ from scripts import calibrate_heston
 from scripts.calibrate_heston import build_config, plot_market_comparisons
 from stabilvol.heston import CalibrationConfig, HestonCalibrator, HestonParams, SimulationConfig, simulate_modified_heston
 from stabilvol.heston.calibration import _heston_worker_objective, moments_frame, table_name_for_thresholds
-from stabilvol.heston.paper_reproduction import count_fortran_hitting_events
+from stabilvol.heston.paper_reproduction import count_fortran_hitting_events, fortran_empirical_scale
 from stabilvol.utility.classes.stability_analysis import StabilVolter
 
 
@@ -93,6 +93,27 @@ class HestonSimulationTests(unittest.TestCase):
 
 
 class HestonCountingTests(unittest.TestCase):
+    def test_fortran_market_scale_is_mean_population_sd_after_anomaly_clipping(self):
+        values = np.array([[1.0, 0.0], [3.0, 4.0], [101.0, np.nan]])
+        # The first series becomes [1, 3, 0]; the second uses [0, 4].
+        expected = (np.std([1.0, 3.0, 0.0], ddof=0) + np.std([0.0, 4.0], ddof=0)) / 2
+        self.assertAlmostEqual(fortran_empirical_scale(values), expected)
+
+    def test_fortran_empirical_loader_removes_only_market_closed_days(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            folder = Path(temporary) / "data" / "interim"
+            folder.mkdir(parents=True)
+            dates = pd.date_range("2000-01-03", periods=4, freq="B")
+            pd.DataFrame({"a": [0.0, np.nan, -0.2, -2.0],
+                          "b": [0.0, np.nan, np.nan, -2.0]}, index=dates).to_pickle(folder / "UN.pickle")
+            config = CalibrationConfig(root=temporary, markets=("UN",),
+                                       empirical_source="returns", count_method="fortran",
+                                       threshold_sigma=1.0, start_date="2000-01-03",
+                                       end_date="2000-01-06")
+            returns = HestonCalibrator(config).load_empirical_returns("UN")
+            self.assertEqual(returns.index.tolist(), [dates[0], dates[2], dates[3]])
+            self.assertTrue(np.isnan(returns.loc[dates[2], "b"]))
+
     def test_fortran_counter_includes_crossing_return_and_breaks_on_missing_day(self):
         values = np.array([[0.0], [-0.1], [0.2], [-2.0]])
         events = count_fortran_hitting_events(values, 1.0, tau_max=30)

@@ -20,20 +20,9 @@ import numpy as np
 import pandas as pd
 
 from stabilvol.heston import HestonParams, SimulationConfig, simulate_modified_heston
-from stabilvol.heston.paper_reproduction import count_fortran_hitting_events, fortran_mfht_curve
-
-
-def fortran_scale(values: np.ndarray, anomaly_limit: float) -> float:
-    """Mean per-column population SD, clipping raw anomalies as calmG.f does."""
-    clipped = np.where(np.abs(values) > anomaly_limit, 0.0, values)
-    finite_counts = np.isfinite(clipped).sum(axis=0)
-    if not np.any(finite_counts >= 2):
-        raise ValueError("need at least one return series with two observations")
-    std = np.nanstd(clipped[:, finite_counts >= 2], axis=0, ddof=0)
-    sigma = float(np.mean(std))
-    if not np.isfinite(sigma) or sigma <= 0:
-        raise ValueError("invalid Fortran return scale")
-    return sigma
+from stabilvol.heston.paper_reproduction import (
+    count_fortran_hitting_events, fortran_empirical_scale, fortran_mfht_curve,
+)
 
 
 def physical_x(curve: pd.DataFrame) -> pd.Series:
@@ -49,7 +38,7 @@ def main() -> None:
     parser.add_argument("--steps", type=int, default=3030, help="Recorded returns per simulated path")
     parser.add_argument("--seed-offset", type=int, default=500000, help="Independent diagnostic seed offset")
     parser.add_argument("--sigma-mode", choices=("fitted", "fortran"), default="fitted",
-                        help="fitted matches the optimizer's fixed threshold; fortran recomputes each data set's scale")
+                        help="fitted requires the paper's empirical market scale from the fit; fortran separately recomputes each data set's scale")
     args = parser.parse_args()
     if args.paths < 1 or args.steps < 2:
         parser.error("require paths >= 1 and steps >= 2")
@@ -89,6 +78,8 @@ def main() -> None:
         empirical = empirical.loc[:, eligible]
         if empirical.empty or empirical.shape[1] == 0:
             raise ValueError(f"no eligible empirical returns for {market}")
+        market_closed_days = int(empirical.isna().all(axis=1).sum())
+        empirical = empirical.loc[empirical.notna().any(axis=1)]
         empirical_values = empirical.to_numpy(dtype=float, copy=False)
         simulation = simulate_modified_heston(
             params,
@@ -109,11 +100,18 @@ def main() -> None:
             parser.error(f"unknown return transform for {market}")
 
         anomaly_limit = counter_defaults["anomaly_limit"]
+        paper_empirical_sigma = fortran_empirical_scale(empirical_values, anomaly_limit=anomaly_limit)
         if args.sigma_mode == "fitted":
             real_sigma = synthetic_sigma = float(setup["threshold_sigma"])
+            if not np.isclose(real_sigma, paper_empirical_sigma, rtol=1e-6, atol=0):
+                parser.error(
+                    f"{market} fitted threshold_sigma={real_sigma:.9g} differs from the paper's "
+                    f"empirical mean per-series sigma={paper_empirical_sigma:.9g}; "
+                    "rerun the conditional trial optimization with the updated code"
+                )
         else:
-            real_sigma = fortran_scale(empirical_values, anomaly_limit)
-            synthetic_sigma = fortran_scale(synthetic_values, anomaly_limit)
+            real_sigma = paper_empirical_sigma
+            synthetic_sigma = fortran_empirical_scale(synthetic_values, anomaly_limit=anomaly_limit)
         counter = {
             "start_sigma": counter_defaults["start_sigma"],
             "start_upper_sigma": counter_defaults["start_upper_sigma"],
@@ -157,6 +155,7 @@ def main() -> None:
         summary = {
             "market": market, "fit_parameters": str(params_path), "fit_config": str(config_path),
             "parameters": asdict(params), "sigma_mode": args.sigma_mode,
+            "paper_empirical_sigma": paper_empirical_sigma,
             "counter": counter, "binning": binning,
             "synthetic_observation": {
                 "sample_every": setup["sampling_interval_steps"],
@@ -166,6 +165,7 @@ def main() -> None:
                 "seed": int(setup["seed"]) + args.seed_offset,
             },
             "missing_empirical_observations": int(np.isnan(empirical_values).sum()),
+            "market_closed_days_removed": market_closed_days,
             "empirical_missing_policy": "break",
             "datasets": summaries,
         }

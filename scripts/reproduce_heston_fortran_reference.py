@@ -25,7 +25,7 @@ import pandas as pd
 
 from stabilvol.heston import HestonParams, SimulationConfig, simulate_modified_heston
 from stabilvol.heston.paper_reproduction import (
-    count_fortran_hitting_events, fortran_mfht_curve, market_return_scale,
+    count_fortran_hitting_events, fortran_empirical_scale, fortran_mfht_curve, market_return_scale,
 )
 
 
@@ -43,16 +43,13 @@ def count_empirical_market(
     returns = returns.loc[:, observed >= empirical["min_observations"]]
     if returns.shape[1] == 0:
         raise ValueError(f"no eligible return series for {market}")
+    market_closed_days = int(returns.isna().all(axis=1).sum())
+    returns = returns.loc[returns.notna().any(axis=1)]
     values = returns.to_numpy(dtype=float, copy=False)
     if np.isinf(values).any():
         raise ValueError(f"infinite return in {returns_path}")
     # calmG.f clips anomalies only for threshold normalization and crossing tests.
-    clipped = np.where(np.abs(values) > counter["anomaly_limit"], 0.0, values)
-    path_sigma = np.nanstd(clipped, axis=0, ddof=0)
-    path_sigma = path_sigma[np.isfinite(path_sigma)]
-    sigma_bar = float(path_sigma.mean())
-    if not np.isfinite(sigma_bar) or sigma_bar <= 0:
-        raise ValueError(f"invalid pooled Fortran scale for {market}")
+    sigma_bar = fortran_empirical_scale(values, anomaly_limit=counter["anomaly_limit"])
     events = count_fortran_hitting_events(
         values, sigma_bar, direction="crash", missing_policy=empirical["missing_policy"], **counter,
     )
@@ -66,6 +63,7 @@ def count_empirical_market(
         "paths": int(returns.shape[1]),
         "days": int(returns.shape[0]),
         "missing_observations": int(np.isnan(values).sum()),
+        "market_closed_days_removed": market_closed_days,
         "missing_policy": empirical["missing_policy"],
         "sigma_bar": sigma_bar,
         "events": len(events),

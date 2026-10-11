@@ -18,6 +18,28 @@ def market_return_scale(returns: np.ndarray, *, ddof: int = 1) -> float:
     return float(np.std(values, axis=0, ddof=ddof).mean())
 
 
+def fortran_empirical_scale(returns: np.ndarray, *, anomaly_limit: float = 100.0) -> float:
+    """calmG.f sigma_tot: mean per-series population SD after raw anomaly clipping.
+
+    Missing observations are ignored within each real stock's SD. Columns with
+    fewer than two observations are excluded; the caller selects the stock
+    universe before invoking this function.
+    """
+    values = np.asarray(returns, dtype=float)
+    if values.ndim != 2 or values.shape[1] < 1 or np.isinf(values).any():
+        raise ValueError("returns must be a two-dimensional array without infinities")
+    if not np.isfinite(anomaly_limit) or anomaly_limit <= 0:
+        raise ValueError("anomaly_limit must be positive and finite")
+    clipped = np.where(np.abs(values) > anomaly_limit, 0.0, values)
+    eligible = np.isfinite(clipped).sum(axis=0) >= 2
+    if not np.any(eligible):
+        raise ValueError("need at least one return series with two observations")
+    sigma = float(np.nanstd(clipped[:, eligible], axis=0, ddof=0).mean())
+    if not np.isfinite(sigma) or sigma <= 0:
+        raise ValueError("invalid Fortran empirical return scale")
+    return sigma
+
+
 def count_fortran_hitting_events(
     returns: np.ndarray,
     sigma_bar: float,

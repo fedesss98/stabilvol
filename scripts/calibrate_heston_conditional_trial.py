@@ -14,12 +14,17 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from scripts.calibrate_heston_sampling_sweep import parameters_from_csv
+import pandas as pd
+
+from stabilvol.heston.paper_reproduction import fortran_empirical_scale
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--selection", type=Path, default=Path(
         "data/processed/heston_calibration/four_market_sampling_sweep/final_selection.json"))
+    parser.add_argument("--initial-fit-dir", type=Path,
+                        help="Seed each market from a prior calibration's parameter CSV")
     parser.add_argument("--markets", nargs="+", choices=("UN", "UW", "LN", "JT"))
     parser.add_argument("--counter", choices=("fortran_clean", "fortran", "quiet_pandas"),
                         default="fortran_clean")
@@ -54,9 +59,26 @@ def main() -> None:
         source = selection_path.parent / market
         base = json.loads((source / f"config_interval_{interval}.json").read_text(encoding="utf-8"))
         parameters = source / f"interval_{interval}" / "heston_calibration_parameters.csv"
+        if args.initial_fit_dir is not None:
+            parameters = args.initial_fit_dir.resolve() / market / "heston_calibration_parameters.csv"
+            if not parameters.is_file():
+                parser.error(f"missing initial fit for {market}: {parameters}")
         base["initial_params"] = parameters_from_csv(parameters, market)
         base["loss_metric"] = "conditional_fht"
         base["count_method"] = args.counter
+        if args.counter in ("fortran", "fortran_clean"):
+            empirical = pd.read_pickle(PROJECT_ROOT / "data" / "interim" / f"{market}.pickle")
+            empirical = empirical.loc[base.get("start_date", "1980-01-01"):
+                                      base.get("end_date", "2022-07-01")]
+            minimum = max(2, int(base.get("min_empirical_observations", 0)))
+            empirical = empirical.loc[:, empirical.notna().sum(axis=0) >= minimum]
+            empirical = empirical.loc[empirical.notna().any(axis=1)]
+            if empirical.shape[1] == 0:
+                raise ValueError(f"no eligible empirical return series for {market}")
+            base["threshold_sigma"] = fortran_empirical_scale(empirical.to_numpy(dtype=float, copy=False))
+            base["threshold_sigma_method"] = "Fortran mean per-series population SD of selected empirical stocks; abs(return)>100 replaced by zero"
+            base["threshold_sigma_stock_count"] = int(empirical.shape[1])
+            base.pop("threshold_sigma_clip_bounds", None)
         base["synthetic_return_transform"] = args.return_transform
         base["tau_max"] = args.tau_max
         base["return_loss_weight"] = args.return_weight

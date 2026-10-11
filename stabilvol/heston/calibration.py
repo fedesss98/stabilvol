@@ -282,7 +282,12 @@ class HestonCalibrator:
         data = pd.read_pickle(path)
         dated = data.loc[self.config.start_date : self.config.end_date]
         keep = dated.notna().sum(axis=0) >= self.config.min_empirical_observations
-        self._returns_cache[market] = dated.loc[:, keep]
+        selected = dated.loc[:, keep]
+        if self.config.empirical_source == "returns" and self.config.count_method in ("fortran", "fortran_clean"):
+            # The interim matrices include shared no-trading dates. calmG.f read
+            # dense trading-day rows; a market-wide NaN row was never a day.
+            selected = selected.loc[selected.notna().any(axis=1)]
+        self._returns_cache[market] = selected
         return self._returns_cache[market]
 
     def empirical_return_target(self, market: str) -> ReturnTarget:
