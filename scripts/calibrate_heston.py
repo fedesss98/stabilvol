@@ -114,8 +114,11 @@ def print_result(record: dict[str, object]) -> None:
     if "plot_mfht_loss" in record and "plot_return_loss" in record:
         print(f"  plot losses: MFHT={record['plot_mfht_loss']:.6g}, returns={record['plot_return_loss']:.6g}")
     if "plot_conditional_fht_loss" in record:
-        print(f"  plot losses: conditional FHT={record['plot_conditional_fht_loss']:.6g}, "
-              f"nonzero returns={record['plot_nonzero_return_loss']:.6g}")
+        parts = [f"conditional FHT={record['plot_conditional_fht_loss']:.6g}"]
+        if "plot_mfht_loss" in record:
+            parts.append(f"MFHT={record['plot_mfht_loss']:.6g}")
+        parts.append(f"nonzero returns={record['plot_nonzero_return_loss']:.6g}")
+        print("  plot losses: " + ", ".join(parts))
     print(f"  elapsed_seconds: {record['elapsed_seconds']:.3f}")
 
 
@@ -170,6 +173,7 @@ def build_config(args: argparse.Namespace, config_data: dict) -> CalibrationConf
         empirical_source=config_data.get("empirical_source", defaults.empirical_source),
         threshold_sigma=config_data.get("threshold_sigma", defaults.threshold_sigma),
         return_loss_weight=config_data.get("return_loss_weight", defaults.return_loss_weight),
+        mfht_loss_weight=config_data.get("mfht_loss_weight", defaults.mfht_loss_weight),
         conditional_vol_quantiles=tuple(config_data.get("conditional_vol_quantiles", defaults.conditional_vol_quantiles)),
         seed=args.seed if args.seed is not None else config_data.get("seed", defaults.seed),
         bounds=bounds,
@@ -708,6 +712,7 @@ def main() -> None:
                 "empirical_source": market_config.empirical_source,
                 "threshold_sigma": market_config.threshold_sigma,
                 "return_loss_weight": market_config.return_loss_weight,
+                "mfht_loss_weight": market_config.mfht_loss_weight,
                 "sampling_interval_steps": market_config.sampling_interval_steps,
                 "sampling_burn_in_steps": market_config.sampling_burn_in_steps,
                 "sampling_return_mode": market_config.sampling_return_mode,
@@ -739,8 +744,18 @@ def main() -> None:
         )
         if config.loss_metric == "conditional_fht":
             return_distribution = calibrator.empirical_return_distribution_target(market)
-            result_record["plot_conditional_fht_loss"] = calibrator.grid_loss(
-                calibrator.load_empirical_grid(market), synthetic_returns, market)
+            conditional_losses = []
+            mfht_losses = []
+            for pair, empirical_events in calibrator.load_empirical_grid(market).items():
+                synthetic_events = calibrator.count_simulated_events(synthetic_returns, pair, market)
+                conditional_losses.append(calibrator.conditional_loss(
+                    calibrator.prepare_conditional_target(empirical_events), synthetic_events))
+                if market_config.mfht_loss_weight:
+                    mfht_losses.append(calibrator.curve_loss(
+                        calibrator.prepare_curve_target(empirical_events), synthetic_events))
+            result_record["plot_conditional_fht_loss"] = float(np.mean(conditional_losses))
+            if mfht_losses:
+                result_record["plot_mfht_loss"] = float(np.mean(mfht_losses))
             result_record["plot_nonzero_return_loss"] = calibrator.return_distribution_loss(
                 synthetic_returns, return_distribution)
             result_record["empirical_exact_zero_fraction"] = return_distribution.exact_zero_fraction

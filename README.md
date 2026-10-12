@@ -126,6 +126,15 @@ If results were produced before the market-closed-day fix, rerun **both** comman
 
 Fits made with the earlier clipped pooled `threshold_sigma` must also be rerun to use the paper threshold scale. Add `--initial-fit-dir <prior-fit-directory>` to the conditional trial command to seed the new optimization with previous fitted parameters. The recount checks that its fitted scale equals the mean empirical per-stock population SD and stops with an error if an old incompatible fit is passed.
 
+To improve the MFHT shape while retaining the conditional FHT and nonzero-return objectives, refit from the saved paper-sigma market parameters with a weighted MFHT term. The trial accepts `--base-fit-dir`, so the sampling-sweep selection files are not required on a machine holding only the copied fits. A first run can target UN and LN, where the independent-seed MFHT comparison shows the largest peak mismatch:
+
+```powershell
+.venv/Scripts/python.exe scripts/calibrate_heston_conditional_trial.py --base-fit-dir data/processed/heston_calibration/conditional_fortran_300_paper_sigma --markets UN LN --counter fortran --tau-max 300 --mfht-weight 0.2 --mfht-bins 30 --mfht-min-bin-events 100 --mfht-min-synthetic-bin-events 30 --maxiter 160 --popsize 8 --workers 8 --output-dir data/processed/heston_calibration/conditional_mfht_joint_trial --figure-dir visualization/heston_calibration/conditional_mfht_joint_trial
+.venv/Scripts/python.exe scripts/count_optimized_heston_mfht.py --fit-dir data/processed/heston_calibration/conditional_mfht_joint_trial --markets UN LN
+```
+
+The loss is `conditional FHT + 0.2 × MFHT curve + nonzero-return distribution`. Both threshold multipliers stay at `-0.1` and `-1.5`, using the same empirical market sigma. The 30 MFHT bins and minimum event counts apply to the **fit objective**; notebook 25's `MFHT_BIN_GROUP` only changes the display. Compare the new independent-seed recount and the saved loss components against the previous fit before using the new parameters. In notebook 25, set `FITTED_MFHT_RUN = 'conditional_mfht_joint_trial'` to view the new recount. Run UW and JT with the same flags once UN and LN have been assessed.
+
 For Slurm on the configured cluster, run `uv sync` from `/data/qmla/famato/stabilvol` before submitting:
 
 ```bash

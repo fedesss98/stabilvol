@@ -98,6 +98,7 @@ class HestonCountingTests(unittest.TestCase):
         # The first series becomes [1, 3, 0]; the second uses [0, 4].
         expected = (np.std([1.0, 3.0, 0.0], ddof=0) + np.std([0.0, 4.0], ddof=0)) / 2
         self.assertAlmostEqual(fortran_empirical_scale(values), expected)
+        self.assertAlmostEqual(fortran_empirical_scale(np.tile(values, (1, 65))), expected)
 
     def test_fortran_empirical_loader_removes_only_market_closed_days(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -204,6 +205,28 @@ class HestonCalibrationTests(unittest.TestCase):
         self.assertAlmostEqual(calibrator.conditional_loss(target, empirical), 0.0)
         self.assertGreater(calibrator.conditional_loss(target, reversed_durations), 0.0)
         self.assertGreater(calibrator.conditional_loss(target, empirical.iloc[:2]), 0.0)
+
+    def test_joint_objective_adds_mfht_loss_from_same_events(self):
+        config = CalibrationConfig(
+            loss_metric="conditional_fht", mfht_loss_weight=0.25,
+            tau_min=2, tau_max=10, n_vol_bins=2,
+            conditional_vol_quantiles=(0.0, 0.5, 1.0),
+            min_empirical_bin_events=1, min_simulated_bin_events=1,
+            event_count_weight=0.0,
+        )
+        calibrator = HestonCalibrator(config)
+        empirical = pd.DataFrame({"Volatility": [0.1, 0.2, 0.3, 0.4], "FHT": [2, 2, 8, 8]})
+        simulated = pd.DataFrame({"Volatility": [0.1, 0.2, 0.3, 0.4], "FHT": [8, 8, 2, 2]})
+        pair = (-0.1, -1.5)
+        target = calibrator._prepare_objective_grid({pair: empirical})[pair]
+        expected = (calibrator.conditional_loss(target.conditional, simulated)
+                    + 0.25 * calibrator.curve_loss(target.mfht, simulated))
+        with patch.object(calibrator, "count_simulated_events", return_value=simulated) as count:
+            self.assertAlmostEqual(calibrator.grid_loss({pair: target}, pd.DataFrame(), "UN"), expected)
+            self.assertAlmostEqual(calibrator.grid_loss({pair: empirical}, pd.DataFrame(), "UN"), expected)
+            self.assertEqual(count.call_count, 2)
+        with self.assertRaisesRegex(ValueError, "requires loss_metric"):
+            CalibrationConfig(loss_metric="mfht_curve", mfht_loss_weight=0.25)
 
     def test_nonzero_return_distribution_excludes_exact_zeros(self):
         with tempfile.TemporaryDirectory() as directory:

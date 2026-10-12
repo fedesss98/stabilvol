@@ -30,11 +30,20 @@ def fortran_empirical_scale(returns: np.ndarray, *, anomaly_limit: float = 100.0
         raise ValueError("returns must be a two-dimensional array without infinities")
     if not np.isfinite(anomaly_limit) or anomaly_limit <= 0:
         raise ValueError("anomaly_limit must be positive and finite")
-    clipped = np.where(np.abs(values) > anomaly_limit, 0.0, values)
-    eligible = np.isfinite(clipped).sum(axis=0) >= 2
-    if not np.any(eligible):
+    # NumPy's nanstd makes several full-size copies. Process columns in blocks
+    # so the large empirical market matrices fit in memory.
+    sigma_sum = 0.0
+    stock_count = 0
+    for start in range(0, values.shape[1], 64):
+        block = values[:, start:start + 64]
+        clipped = np.where(np.abs(block) > anomaly_limit, 0.0, block)
+        eligible = np.isfinite(clipped).sum(axis=0) >= 2
+        if np.any(eligible):
+            sigma_sum += float(np.nanstd(clipped[:, eligible], axis=0, ddof=0).sum())
+            stock_count += int(eligible.sum())
+    if stock_count == 0:
         raise ValueError("need at least one return series with two observations")
-    sigma = float(np.nanstd(clipped[:, eligible], axis=0, ddof=0).mean())
+    sigma = sigma_sum / stock_count
     if not np.isfinite(sigma) or sigma <= 0:
         raise ValueError("invalid Fortran empirical return scale")
     return sigma

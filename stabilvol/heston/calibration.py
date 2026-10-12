@@ -68,6 +68,7 @@ class CalibrationConfig:
     empirical_source: str = "database"
     threshold_sigma: Optional[float] = None
     return_loss_weight: float = 0.0
+    mfht_loss_weight: float = 0.0
     conditional_vol_quantiles: tuple[float, ...] = (0.0, 0.5, 0.85, 0.97, 0.995)
     seed: int = 12345
     bounds: dict[str, tuple[float, float]] = field(default_factory=lambda: dict(DEFAULT_BOUNDS))
@@ -99,6 +100,10 @@ class CalibrationConfig:
             raise ValueError("threshold_sigma must be positive")
         if self.return_loss_weight < 0:
             raise ValueError("return_loss_weight must be nonnegative")
+        if not np.isfinite(self.mfht_loss_weight) or self.mfht_loss_weight < 0:
+            raise ValueError("mfht_loss_weight must be finite and nonnegative")
+        if self.mfht_loss_weight and self.loss_metric != "conditional_fht":
+            raise ValueError("mfht_loss_weight requires loss_metric='conditional_fht'")
         if self.n_vol_bins < 1 or self.min_empirical_bin_events < 1 or self.min_simulated_bin_events < 1:
             raise ValueError("bin counts and minimum events per bin must be positive")
         if self.min_empirical_observations < 0:
@@ -152,7 +157,7 @@ class CalibrationResult:
 class ObjectivePayload:
     config: CalibrationConfig
     market: str
-    empirical_grid: dict[tuple[float, float], pd.DataFrame | CurveTarget | ConditionalFHTTarget]
+    empirical_grid: dict[tuple[float, float], pd.DataFrame | CurveTarget | ConditionalFHTTarget | JointFHTTarget]
     n_paths: int
     n_steps: int
     seed: int
@@ -180,6 +185,14 @@ class ConditionalFHTTarget:
     survival: np.ndarray
     eligible: np.ndarray
     total_events: int
+
+
+@dataclass(frozen=True)
+class JointFHTTarget:
+    """Conditional-duration and MFHT targets from the same empirical events."""
+
+    conditional: ConditionalFHTTarget
+    mfht: CurveTarget
 
 
 @dataclass(frozen=True)
@@ -630,7 +643,7 @@ class HestonCalibrator:
         ).sum()
         return float(region_errors.mean() + self.config.event_count_weight * occupancy)
 
-    def grid_loss(self, empirical_grid: dict[tuple[float, float], pd.DataFrame | CurveTarget | ConditionalFHTTarget], simulated_returns: pd.DataFrame, market: str) -> float:
+    def grid_loss(self, empirical_grid: dict[tuple[float, float], pd.DataFrame | CurveTarget | ConditionalFHTTarget | JointFHTTarget], simulated_returns: pd.DataFrame, market: str) -> float:
         losses = []
         for pair, empirical in empirical_grid.items():
             simulated = self.count_simulated_events(simulated_returns, pair, market)
@@ -638,8 +651,18 @@ class HestonCalibrator:
                 target = empirical if isinstance(empirical, CurveTarget) else self.prepare_curve_target(empirical)
                 losses.append(self.curve_loss(target, simulated))
             elif self.config.loss_metric == "conditional_fht":
-                target = empirical if isinstance(empirical, ConditionalFHTTarget) else self.prepare_conditional_target(empirical)
-                losses.append(self.conditional_loss(target, simulated))
+                if isinstance(empirical, JointFHTTarget):
+                    losses.append(self.conditional_loss(empirical.conditional, simulated)
+                                  + self.config.mfht_loss_weight * self.curve_loss(empirical.mfht, simulated))
+                else:
+                    target = empirical if isinstance(empirical, ConditionalFHTTarget) else self.prepare_conditional_target(empirical)
+                    loss = self.conditional_loss(target, simulated)
+                    if self.config.mfht_loss_weight:
+                        if isinstance(empirical, ConditionalFHTTarget):
+                            raise ValueError("MFHT weight requires a joint target or raw empirical events")
+                        loss += self.config.mfht_loss_weight * self.curve_loss(
+                            self.prepare_curve_target(empirical), simulated)
+                    losses.append(loss)
             else:
                 if not isinstance(empirical, pd.DataFrame):
                     raise TypeError("fht_distribution loss requires empirical events")
@@ -664,7 +687,7 @@ class HestonCalibrator:
         vector: np.ndarray,
         *,
         market: str,
-        empirical_grid: dict[tuple[float, float], pd.DataFrame | CurveTarget | ConditionalFHTTarget],
+        empirical_grid: dict[tuple[float, float], pd.DataFrame | CurveTarget | ConditionalFHTTarget | JointFHTTarget],
         n_paths: int,
         n_steps: int,
         seed: int,
@@ -885,10 +908,14 @@ class HestonCalibrator:
         return loss, observed_returns
 
     def _prepare_objective_grid(self, empirical_grid: dict[tuple[float, float], pd.DataFrame]
-                                ) -> dict[tuple[float, float], pd.DataFrame | CurveTarget | ConditionalFHTTarget]:
+                                ) -> dict[tuple[float, float], pd.DataFrame | CurveTarget | ConditionalFHTTarget | JointFHTTarget]:
         if self.config.loss_metric == "mfht_curve":
             return {pair: self.prepare_curve_target(events) for pair, events in empirical_grid.items()}
         if self.config.loss_metric == "conditional_fht":
+            if self.config.mfht_loss_weight:
+                return {pair: JointFHTTarget(self.prepare_conditional_target(events),
+                                             self.prepare_curve_target(events))
+                        for pair, events in empirical_grid.items()}
             return {pair: self.prepare_conditional_target(events) for pair, events in empirical_grid.items()}
         return empirical_grid
 

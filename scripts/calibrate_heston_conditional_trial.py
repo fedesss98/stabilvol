@@ -23,6 +23,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--selection", type=Path, default=Path(
         "data/processed/heston_calibration/four_market_sampling_sweep/final_selection.json"))
+    parser.add_argument("--base-fit-dir", type=Path,
+                        help="Copy each market's prior trial config; does not require the sampling-sweep selection")
     parser.add_argument("--initial-fit-dir", type=Path,
                         help="Seed each market from a prior calibration's parameter CSV")
     parser.add_argument("--markets", nargs="+", choices=("UN", "UW", "LN", "JT"))
@@ -32,6 +34,11 @@ def main() -> None:
     parser.add_argument("--tau-max", type=int, default=30,
                         help="30 compares with prior fits; 300 matches calmG.f")
     parser.add_argument("--return-weight", type=float, default=1.0)
+    parser.add_argument("--mfht-weight", type=float, default=0.0,
+                        help="Add this weighted MFHT-curve loss to the conditional FHT objective")
+    parser.add_argument("--mfht-bins", type=int, default=30)
+    parser.add_argument("--mfht-min-bin-events", type=int, default=100)
+    parser.add_argument("--mfht-min-synthetic-bin-events", type=int, default=30)
     parser.add_argument("--maxiter", type=int, default=80)
     parser.add_argument("--popsize", type=int, default=8)
     parser.add_argument("--workers", type=int, default=8)
@@ -47,18 +54,28 @@ def main() -> None:
     parser.add_argument("--figure-dir", type=Path, default=Path(
         "visualization/heston_calibration/conditional_trial"))
     args = parser.parse_args()
-    if args.tau_max < 2 or args.return_weight < 0 or args.maxiter < 0 or args.popsize < 1 or args.workers < 1:
-        parser.error("invalid tau-max, return-weight, maxiter, popsize, or workers")
-    selection_path = args.selection.resolve()
-    selection = json.loads(selection_path.read_text(encoding="utf-8"))
-    markets = args.markets or list(selection)
+    if (args.tau_max < 2 or args.return_weight < 0 or args.mfht_weight < 0
+            or args.maxiter < 0 or args.popsize < 1 or args.workers < 1
+            or args.mfht_bins < 1 or args.mfht_min_bin_events < 1
+            or args.mfht_min_synthetic_bin_events < 1):
+        parser.error("invalid calibration weight, bin count, iteration count, or worker count")
+    base_fit_dir = args.base_fit_dir.resolve() if args.base_fit_dir else None
+    selection_path = args.selection.resolve() if base_fit_dir is None else None
+    selection = json.loads(selection_path.read_text(encoding="utf-8")) if selection_path else None
+    markets = args.markets or (list(selection) if selection else ["UN", "UW", "LN", "JT"])
     output_root = args.output_dir.resolve()
     figure_root = args.figure_dir.resolve()
     for market in markets:
-        interval = int(selection[market])
-        source = selection_path.parent / market
-        base = json.loads((source / f"config_interval_{interval}.json").read_text(encoding="utf-8"))
-        parameters = source / f"interval_{interval}" / "heston_calibration_parameters.csv"
+        if base_fit_dir is None:
+            interval = int(selection[market])
+            source = selection_path.parent / market
+            base = json.loads((source / f"config_interval_{interval}.json").read_text(encoding="utf-8"))
+            parameters = source / f"interval_{interval}" / "heston_calibration_parameters.csv"
+        else:
+            source = base_fit_dir / market
+            base = json.loads((source / "trial_config.json").read_text(encoding="utf-8"))
+            interval = int(base["sampling_interval_steps"])
+            parameters = source / "heston_calibration_parameters.csv"
         if args.initial_fit_dir is not None:
             parameters = args.initial_fit_dir.resolve() / market / "heston_calibration_parameters.csv"
             if not parameters.is_file():
@@ -82,12 +99,17 @@ def main() -> None:
         base["synthetic_return_transform"] = args.return_transform
         base["tau_max"] = args.tau_max
         base["return_loss_weight"] = args.return_weight
+        base["mfht_loss_weight"] = args.mfht_weight
+        if args.mfht_weight:
+            base["n_vol_bins"] = args.mfht_bins
+            base["min_empirical_bin_events"] = args.mfht_min_bin_events
+            base["min_simulated_bin_events"] = args.mfht_min_synthetic_bin_events
         base["conditional_vol_quantiles"] = [0.0, 0.5, 0.85, 0.97, 0.995]
         if args.seed is not None:
             base["seed"] = args.seed
         base["description"] = (
-            f"{market} {interval}dt conditional FHT and nonzero-return trial, "
-            f"seeded from the selected MFHT fit; {args.counter} event counter."
+            f"{market} {interval}dt conditional FHT, MFHT (weight {args.mfht_weight:g}), "
+            f"and nonzero-return trial seeded from {parameters}; {args.counter} event counter."
         )
         if args.pilot_paths is not None:
             base["pilot_max_paths"] = args.pilot_paths
