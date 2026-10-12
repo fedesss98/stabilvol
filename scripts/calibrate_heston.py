@@ -42,6 +42,10 @@ def default_run_options() -> dict[str, object]:
         "maxiter": 20,
         "popsize": 8,
         "workers": 1,
+        "strategy": "best1bin",
+        "mutation_min": 0.5,
+        "mutation_max": 1.0,
+        "recombination": 0.7,
         "polish": False,
         "refine": False,
         "quiet_progress": False,
@@ -469,6 +473,10 @@ def main() -> None:
     parser.add_argument("--maxiter", type=int)
     parser.add_argument("--popsize", type=int)
     parser.add_argument("--workers", type=int, help="Parallel optimizer workers. Use -1 for all available cores.")
+    parser.add_argument("--strategy", choices=("best1bin", "rand1bin", "randtobest1bin"))
+    parser.add_argument("--mutation-min", type=float)
+    parser.add_argument("--mutation-max", type=float)
+    parser.add_argument("--recombination", type=float)
     parser.add_argument("--polish", action="store_true", default=None)
     parser.add_argument("--no-polish", dest="polish", action="store_false")
     parser.add_argument("--refine", action="store_true", default=None)
@@ -491,6 +499,9 @@ def main() -> None:
 
     config_data = load_json_config(args.config_json) if args.config_json else {}
     run_options = build_run_options(args, config_data)
+    if (not 0 <= run_options.mutation_min <= run_options.mutation_max < 2
+            or not 0 <= run_options.recombination <= 1):
+        parser.error("require 0 <= mutation-min <= mutation-max < 2 and 0 <= recombination <= 1")
     config = build_config(args, config_data)
     if config.empirical_source == "database" and config.loss_metric != "return_moments" and not config.absolute_database_path.is_file():
         parser.error(f"empirical FHT database not found: {config.absolute_database_path}")
@@ -553,6 +564,8 @@ def main() -> None:
         print(
             "  optimizer: "
             f"maxiter={run_options.maxiter}, popsize={run_options.popsize}, workers={run_options.workers}, "
+            f"strategy={run_options.strategy}, mutation=({run_options.mutation_min:g}, {run_options.mutation_max:g}), "
+            f"recombination={run_options.recombination:g}, "
             f"full_validation={not run_options.skip_full_validation}"
         )
         print(
@@ -585,6 +598,9 @@ def main() -> None:
                 maxiter=run_options.return_maxiter,
                 popsize=run_options.return_popsize,
                 workers=run_options.workers,
+                strategy=run_options.strategy,
+                mutation=(run_options.mutation_min, run_options.mutation_max),
+                recombination=run_options.recombination,
                 polish=run_options.polish,
                 refine=run_options.refine,
                 validate_full=False,
@@ -676,6 +692,9 @@ def main() -> None:
                 maxiter=run_options.maxiter,
                 popsize=run_options.popsize,
                 workers=run_options.workers,
+                strategy=run_options.strategy,
+                mutation=(run_options.mutation_min, run_options.mutation_max),
+                recombination=run_options.recombination,
                 polish=run_options.polish,
                 refine=run_options.refine,
                 validate_full=not run_options.skip_full_validation,
@@ -726,6 +745,10 @@ def main() -> None:
                 "maxiter": run_options.maxiter,
                 "popsize": run_options.popsize,
                 "workers": run_options.workers,
+                "strategy": run_options.strategy,
+                "mutation_min": run_options.mutation_min,
+                "mutation_max": run_options.mutation_max,
+                "recombination": run_options.recombination,
                 "polish": run_options.polish,
                 "refine": run_options.refine,
                 "skip_full_validation": run_options.skip_full_validation,
@@ -792,6 +815,10 @@ def main() -> None:
                 "maxiter": run_options.maxiter,
                 "popsize": run_options.popsize,
                 "workers": run_options.workers,
+                "strategy": run_options.strategy,
+                "mutation_min": run_options.mutation_min,
+                "mutation_max": run_options.mutation_max,
+                "recombination": run_options.recombination,
                 "plots_n_paths": plot_n_paths,
                 "plots_n_steps": plot_n_steps,
                 "elapsed_seconds": market_elapsed,

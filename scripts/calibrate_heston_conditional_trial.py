@@ -42,6 +42,11 @@ def main() -> None:
     parser.add_argument("--maxiter", type=int, default=80)
     parser.add_argument("--popsize", type=int, default=8)
     parser.add_argument("--workers", type=int, default=8)
+    parser.add_argument("--strategy", choices=("best1bin", "rand1bin", "randtobest1bin"),
+                        default="best1bin")
+    parser.add_argument("--mutation-min", type=float, default=0.5)
+    parser.add_argument("--mutation-max", type=float, default=1.0)
+    parser.add_argument("--recombination", type=float, default=0.7)
     parser.add_argument("--seed", type=int, help="Override the optimizer and simulation seed")
     parser.add_argument("--pilot-paths", type=int)
     parser.add_argument("--pilot-steps", type=int)
@@ -57,7 +62,9 @@ def main() -> None:
     if (args.tau_max < 2 or args.return_weight < 0 or args.mfht_weight < 0
             or args.maxiter < 0 or args.popsize < 1 or args.workers < 1
             or args.mfht_bins < 1 or args.mfht_min_bin_events < 1
-            or args.mfht_min_synthetic_bin_events < 1):
+            or args.mfht_min_synthetic_bin_events < 1
+            or not 0 <= args.mutation_min <= args.mutation_max < 2
+            or not 0 <= args.recombination <= 1):
         parser.error("invalid calibration weight, bin count, iteration count, or worker count")
     base_fit_dir = args.base_fit_dir.resolve() if args.base_fit_dir else None
     selection_path = args.selection.resolve() if base_fit_dir is None else None
@@ -117,6 +124,8 @@ def main() -> None:
             base["pilot_n_steps"] = args.pilot_steps
         run = base.setdefault("run", {})
         run.update(maxiter=args.maxiter, popsize=args.popsize, workers=args.workers,
+                   strategy=args.strategy, mutation_min=args.mutation_min,
+                   mutation_max=args.mutation_max, recombination=args.recombination,
                    staged=False, output_dir=str(output_root / market),
                    figure_dir=str(figure_root))
         if args.skip_full_validation:

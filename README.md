@@ -135,6 +135,8 @@ To improve the MFHT shape while retaining the conditional FHT and nonzero-return
 
 The loss is `conditional FHT + 0.2 × MFHT curve + nonzero-return distribution`. Both threshold multipliers stay at `-0.1` and `-1.5`, using the same empirical market sigma. The 30 MFHT bins and minimum event counts apply to the **fit objective**; notebook 25's `MFHT_BIN_GROUP` only changes the display. Compare the new independent-seed recount and the saved loss components against the previous fit before using the new parameters. In notebook 25, set `FITTED_MFHT_RUN = 'conditional_mfht_joint_trial'` to view the new recount. Run UW and JT with the same flags once UN and LN have been assessed.
 
+The optimizer is SciPy differential evolution. Its default strategy is `best1bin`, with mutation dithering over `(0.5, 1.0)` and recombination `0.7`. The conditional trial accepts `--strategy`, `--mutation-min`, `--mutation-max`, and `--recombination`; for a separate exploratory restart, try `--strategy rand1bin --mutation-min 0.7 --mutation-max 1.3 --recombination 0.5 --seed 23456` with a distinct `--output-dir`. Larger mutation explores farther but does not guarantee faster improvement. Progress lines now include the population's median loss as well as the best loss; the best can remain unchanged while the population moves. Changing these options requires a new run, and does not alter an optimizer already in progress.
+
 For Slurm on the configured cluster, run `uv sync` from `/data/qmla/famato/stabilvol` before submitting:
 
 ```bash

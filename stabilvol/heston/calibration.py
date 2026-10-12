@@ -735,6 +735,9 @@ class HestonCalibrator:
         maxiter: int = 20,
         popsize: int = 8,
         workers: int = 1,
+        strategy: str = "best1bin",
+        mutation: tuple[float, float] = (0.5, 1.0),
+        recombination: float = 0.7,
         polish: bool = False,
         refine: bool = False,
         validate_full: bool = True,
@@ -774,15 +777,25 @@ class HestonCalibrator:
             generation += 1
             if progress:
                 elapsed = time.perf_counter() - generation_start
+                energies = np.asarray(getattr(intermediate_result, "population_energies", []), dtype=float)
+                finite = energies[np.isfinite(energies)]
+                median = f", median_loss={np.median(finite):.6g}" if finite.size else ""
                 print(
                     f"[{market}] generation {generation}: "
-                    f"best_loss={intermediate_result.fun:.6g}, "
+                    f"best_loss={intermediate_result.fun:.6g}{median}, "
                     f"elapsed={elapsed:.1f}s",
                     flush=True,
                 )
 
         if workers == 0 or workers < -1:
             raise ValueError("workers must be a positive integer or -1")
+        if strategy not in ("best1bin", "rand1bin", "randtobest1bin"):
+            raise ValueError("unsupported differential-evolution strategy")
+        if (len(mutation) != 2 or not np.isfinite(mutation).all()
+                or not 0 <= mutation[0] <= mutation[1] < 2):
+            raise ValueError("mutation must satisfy 0 <= minimum <= maximum < 2")
+        if not np.isfinite(recombination) or not 0 <= recombination <= 1:
+            raise ValueError("recombination must be between 0 and 1")
         with ExitStack() as stack:
             map_workers = 1
             optimizer_objective = objective
@@ -798,9 +811,12 @@ class HestonCalibrator:
             result = differential_evolution(
                 optimizer_objective,
                 bounds=self.bounds_sequence(),
+                strategy=strategy,
                 x0=self.vector_from_params(self.config.initial_params) if self.config.initial_params is not None else None,
                 maxiter=maxiter,
                 popsize=popsize,
+                mutation=mutation,
+                recombination=recombination,
                 seed=seed,
                 workers=map_workers,
                 polish=polish,

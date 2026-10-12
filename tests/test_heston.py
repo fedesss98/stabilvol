@@ -549,11 +549,16 @@ class HestonCalibrationTests(unittest.TestCase):
                 x=calibrator.vector_from_params(config.initial_params),
                 fun=0.2, message="done", success=True,
             )
-            calibrator.calibrate_market("UN", validate_full=False, progress=False)
+            calibrator.calibrate_market(
+                "UN", strategy="rand1bin", mutation=(0.7, 1.3), recombination=0.5,
+                validate_full=False, progress=False)
             np.testing.assert_allclose(
                 optimize.call_args.kwargs["x0"],
                 calibrator.vector_from_params(config.initial_params),
             )
+            self.assertEqual(optimize.call_args.kwargs["strategy"], "rand1bin")
+            self.assertEqual(optimize.call_args.kwargs["mutation"], (0.7, 1.3))
+            self.assertEqual(optimize.call_args.kwargs["recombination"], 0.5)
 
     def test_parallel_optimizer_passes_only_vectors_to_workers(self):
         calibrator = HestonCalibrator(CalibrationConfig(root="."))
