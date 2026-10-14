@@ -52,6 +52,10 @@ class SimulationConfig:
     column_prefix: str = "sim"
     store_state: bool = True
     dtype: str = "float64"
+    stationary_variance: bool = False
+    separate_streams: bool = False
+    variance_dispersion: float = 0.0
+    activity_transitions: Optional[tuple[float, float]] = None
 
 
 @dataclass
@@ -71,6 +75,22 @@ class SimulationResult:
     config: SimulationConfig
     price_shocks: Optional[np.ndarray] = None
     variance_shocks: Optional[np.ndarray] = None
+    reset_counts: Optional[np.ndarray] = None
+    stream_seeds: Optional[dict[str, int]] = None
+
+    @property
+    def reset_affected(self) -> Optional[np.ndarray]:
+        return None if self.reset_counts is None else self.reset_counts > 0
+
+    @property
+    def log_prices(self) -> pd.DataFrame:
+        """End-of-observation log prices, starting immediately before at log(100)."""
+        return np.log(100.0) + self.returns.cumsum()
+
+    @property
+    def prices(self) -> pd.DataFrame:
+        with np.errstate(under="ignore", over="ignore"):
+            return np.exp(self.log_prices)
 
     @property
     def metadata(self) -> dict[str, object]:
@@ -85,6 +105,10 @@ class SimulationResult:
                 "seed": self.config.seed,
                 "variance_scheme": self.config.variance_scheme,
                 "correlated_noise": self.config.correlated_noise,
+                "stationary_variance": self.config.stationary_variance,
+                "stream_seeds": self.stream_seeds,
+                "variance_dispersion": self.config.variance_dispersion,
+                "activity_transitions": self.config.activity_transitions,
             }
         )
         return data
@@ -105,12 +129,23 @@ def _validate_inputs(params: HestonParams, config: SimulationConfig) -> None:
         raise ValueError("n_paths and n_steps must be positive")
     if config.sample_every <= 0 or config.burn_in_steps < 0:
         raise ValueError("sample_every must be positive and burn_in_steps nonnegative")
-    if config.return_mode not in ("pre_reset_step", "sampled_x"):
-        raise ValueError("return_mode must be pre_reset_step or sampled_x")
-    if config.sample_every != 1 and config.return_mode != "sampled_x":
-        raise ValueError("sample_every > 1 requires return_mode='sampled_x'")
-    if config.variance_scheme != "redraw":
-        raise ValueError("Only variance_scheme='redraw' is implemented")
+    if config.return_mode not in ("pre_reset_step", "sampled_x", "accumulated_pre_reset"):
+        raise ValueError("invalid return_mode")
+    if config.sample_every != 1 and config.return_mode == "pre_reset_step":
+        raise ValueError("sample_every > 1 requires an aggregated return mode")
+    if config.variance_scheme not in ("redraw", "cir_exact"):
+        raise ValueError("invalid variance_scheme")
+    if config.variance_scheme == "cir_exact" and config.correlated_noise:
+        raise ValueError("cir_exact currently supports independent shocks only")
+    if config.variance_dispersion < 0 or not np.isfinite(config.variance_dispersion):
+        raise ValueError("variance_dispersion must be finite and nonnegative")
+    if config.variance_dispersion and config.variance_scheme != "cir_exact":
+        raise ValueError("variance dispersion requires cir_exact")
+    if config.activity_transitions is not None:
+        if len(config.activity_transitions) != 2 or any(not 0 <= p <= 1 for p in config.activity_transitions):
+            raise ValueError("activity transitions must be two probabilities")
+        if sum(config.activity_transitions) == 0:
+            raise ValueError("activity chain must have a nonzero transition probability")
     if params.dt <= 0:
         raise ValueError("dt must be positive")
     if params.vstart < 0 or params.bb <= 0:
@@ -119,6 +154,27 @@ def _validate_inputs(params: HestonParams, config: SimulationConfig) -> None:
         raise ValueError("aa must be positive and cc must be non-negative")
     if not -1.0 <= params.rho <= 1.0:
         raise ValueError("rho must be in [-1, 1]")
+    if not all(np.isfinite(v) for v in params.to_dict().values()):
+        raise ValueError("parameters must be finite")
+
+
+def daily_parameters(params: HestonParams, observation_duration: float, substeps: int = 10) -> HestonParams:
+    """Change time units and variance units, keeping one observation one day."""
+    if observation_duration <= 0 or substeps < 1:
+        raise ValueError("positive duration and substeps required")
+    names = ("a", "b", "aa", "bb", "cc", "vstart")
+    return params.update(**{key: getattr(params, key) * observation_duration for key in names}, dt=1 / substeps)
+
+
+def cir_exact_step(variance, kappa, theta, xi, dt, rng):
+    """Exact nonnegative CIR transition, including deterministic xi=0."""
+    decay = np.exp(-kappa * dt)
+    if np.all(np.asarray(xi) == 0):
+        return theta + (variance - theta) * decay
+    scale = np.asarray(xi)**2 * (-np.expm1(-kappa * dt)) / (4 * kappa)
+    degrees = 4 * kappa * theta / np.asarray(xi)**2
+    noncentrality = np.maximum(variance, 0) * decay / scale
+    return scale * rng.noncentral_chisquare(degrees, noncentrality)
 
 
 def _variance_step_redraw(
@@ -176,21 +232,45 @@ def simulate_modified_heston(
 
     _validate_inputs(params, config)
     rng = np.random.default_rng(config.seed)
+    stream_seeds = None
+    price_rng = variance_rng = observation_rng = initial_rng = rng
+    if config.separate_streams or config.variance_scheme == "cir_exact":
+        children = np.random.SeedSequence(config.seed).spawn(4)
+        stream_seeds = {name: int(child.generate_state(1, dtype=np.uint64)[0])
+                        for name, child in zip(("price", "variance", "observation", "initial"), children)}
+        price_rng, variance_rng, observation_rng, initial_rng = [np.random.default_rng(s) for s in stream_seeds.values()]
     dtype = np.dtype(config.dtype)
 
     current_x = np.full(config.n_paths, params.start, dtype=dtype)
     current_variance = np.full(config.n_paths, params.vstart, dtype=dtype)
+    multiplier = np.ones(config.n_paths)
+    if config.variance_dispersion:
+        spread = config.variance_dispersion
+        multiplier = np.exp(spread * initial_rng.standard_normal(config.n_paths) - spread**2 / 2)
+    theta = params.bb * multiplier
+    xi = params.cc * np.sqrt(multiplier)
+    if config.stationary_variance:
+        current_variance = (initial_rng.gamma(2 * params.aa * theta / xi**2, xi**2 / (2 * params.aa))
+                            if params.cc else theta.copy())
     returns = np.empty((config.n_steps, config.n_paths), dtype=dtype)
     x_values = np.empty_like(returns) if config.store_state else None
     variance_values = np.empty_like(returns) if config.store_state else None
     price_shocks = np.empty_like(returns) if keep_shocks else None
     variance_shocks = np.empty_like(returns) if keep_shocks else None
+    reset_counts = np.zeros(returns.shape, dtype=np.int32)
+    accumulated = np.zeros(config.n_paths)
+    interval_resets = np.zeros(config.n_paths, dtype=np.int32)
+    pending_quote = np.zeros(config.n_paths)
+    active_quote = np.ones(config.n_paths, dtype=bool)
+    if config.activity_transitions is not None:
+        to_stale, to_active = config.activity_transitions
+        active_quote = observation_rng.random(config.n_paths) < to_active / (to_stale + to_active)
 
     last_sampled_x = current_x.copy()
     observed_step = 0
     total_internal_steps = config.burn_in_steps + config.n_steps * config.sample_every
     for internal_step in range(total_internal_steps):
-        z_price = rng.standard_normal(config.n_paths)
+        z_price = price_rng.standard_normal(config.n_paths)
         sqrt_variance_dt = np.sqrt(np.maximum(current_variance, 0.0) * params.dt)
         next_x = (
             current_x
@@ -200,9 +280,14 @@ def simulate_modified_heston(
         )
         step_returns = next_x - current_x
 
-        next_variance, z_vol = _variance_step_redraw(current_variance, params, rng, z_price, config)
+        if config.variance_scheme == "cir_exact":
+            next_variance = cir_exact_step(current_variance, params.aa, theta, xi, params.dt, variance_rng)
+            z_vol = np.full(config.n_paths, np.nan)  # An exact transition has no Euler Gaussian shock.
+        else:
+            next_variance, z_vol = _variance_step_redraw(current_variance, params, variance_rng, z_price, config)
 
-        next_x = np.where(next_x < params.reset_threshold, params.start, next_x)
+        crossed = next_x < params.reset_threshold
+        next_x = np.where(crossed, params.start, next_x)
         if not np.all(np.isfinite(step_returns)) or not np.all(np.isfinite(next_x)) or not np.all(np.isfinite(next_variance)):
             raise SimulationError("simulation produced non-finite values")
 
@@ -212,12 +297,23 @@ def simulate_modified_heston(
             if internal_step == config.burn_in_steps - 1:
                 last_sampled_x = current_x.copy()
             continue
+        accumulated += step_returns
+        interval_resets += crossed
         if (internal_step - config.burn_in_steps + 1) % config.sample_every:
             continue
 
-        returns[observed_step] = (
-            step_returns if config.return_mode == "pre_reset_step" else current_x - last_sampled_x
-        )
+        observed = (accumulated.copy() if config.return_mode == "accumulated_pre_reset" else
+                    step_returns if config.return_mode == "pre_reset_step" else current_x - last_sampled_x)
+        if config.activity_transitions is not None:
+            pending_quote += observed
+            u = observation_rng.random(config.n_paths)
+            active_quote = np.where(active_quote, u >= to_stale, u < to_active)
+            observed = np.where(active_quote, pending_quote, 0.0)
+            pending_quote[active_quote] = 0.0
+        returns[observed_step] = observed
+        reset_counts[observed_step] = interval_resets
+        accumulated.fill(0)
+        interval_resets.fill(0)
         if config.store_state:
             x_values[observed_step] = current_x
             variance_values[observed_step] = current_variance
@@ -239,4 +335,6 @@ def simulate_modified_heston(
         config=config,
         price_shocks=price_shocks,
         variance_shocks=variance_shocks,
+        reset_counts=reset_counts,
+        stream_seeds=stream_seeds,
     )

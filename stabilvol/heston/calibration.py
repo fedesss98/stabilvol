@@ -21,6 +21,11 @@ from stabilvol.utility.classes.stability_analysis import StabilVolter
 from .paper_reproduction import count_fortran_hitting_events
 from .simulation import HestonParams, SimulationConfig, SimulationError, simulate_modified_heston
 
+# The corrected calibration has its own measurement and acceptance contracts;
+# these public types coexist with historical CalibrationConfig without changing
+# any existing Fortran reproduction or legacy calibration defaults.
+from .corrected import CorrectedConfig, ResolvedTarget, ReturnConstraints
+
 
 DEFAULT_MARKETS = ("UN", "UW", "LN", "JT")
 DEFAULT_THRESHOLD_PAIRS = ((-0.5, -1.5), (-1.0, -2.0), (0.5, 1.5), (1.0, 2.0))

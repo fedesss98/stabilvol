@@ -1,0 +1,22 @@
+{
+  "substeps": 10,
+  "burn_in": 250,
+  "tau_min": 2,
+  "tau_max": 300,
+  "start": -0.1,
+  "end": -1.5,
+  "bin_width": 0.0005,
+  "vol_max": 0.04,
+  "min_events": 200,
+  "min_stocks": 20,
+  "min_synthetic_events": 30,
+  "bootstraps": 300,
+  "bootstrap_seed": 19771,
+  "seeds": [1001, 1002],
+  "fixed_parameters": {"start": 0.0, "rho": 0.0},
+  "mean_tolerance": 0.05,
+  "scale_tolerance": 0.15,
+  "quantile_tolerance": 0.15,
+  "tail_relative_tolerance": 0.25,
+  "acf_tolerance": 0.05
+}

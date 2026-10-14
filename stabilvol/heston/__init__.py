@@ -2,6 +2,7 @@
 
 from .simulation import HestonParams, SimulationConfig, SimulationResult, SimulationError, simulate_modified_heston
 from .calibration import CalibrationConfig, CalibrationResult, HestonCalibrator
+from .corrected import CorrectedConfig, count_episodes, make_target, score_curve
 
 __all__ = [
     "CalibrationConfig",
@@ -12,4 +13,8 @@ __all__ = [
     "SimulationError",
     "SimulationResult",
     "simulate_modified_heston",
+    "CorrectedConfig",
+    "count_episodes",
+    "make_target",
+    "score_curve",
 ]
